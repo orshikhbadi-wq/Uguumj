@@ -19,6 +19,13 @@ This starter does not use `wrangler.jsonc`.
 
 Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
 
+## Prototype and GitHub Source Parity
+
+This repository is the exact code mirror for the `uguumj-arkhad` prototype
+Site. The prototype experience and existing design remain unchanged. Every
+future implementation must update this repository and the prototype Site from
+the same source state, with no separate or divergent code paths.
+
 ## Included Shape
 
 - edit site code under `app/`
