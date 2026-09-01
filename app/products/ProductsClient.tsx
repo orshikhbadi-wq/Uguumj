@@ -255,14 +255,28 @@ export default function ProductsClient() {
         .products-shell{width:min(1160px,calc(100% - 48px));margin:0 auto;padding:76px 0 110px}
         .products-hero{display:grid;grid-template-columns:1.08fr .72fr;gap:90px;align-items:end;padding:30px 0 62px}
         .products-eyebrow{font-size:10px;letter-spacing:.2em;font-weight:700;color:#a98753;margin:0 0 24px}.products-title{font-family:"Uguumj Noto Serif",Georgia,serif;font-weight:400;font-size:clamp(46px,5.4vw,78px);line-height:1.05;letter-spacing:-.035em;margin:0}.products-title em{display:block;color:#234d3a;font-weight:400}.products-intro{font-size:16px;line-height:1.65;color:#766c63;max-width:390px;margin:0 0 8px}
-        .products-controls{border-bottom:1px solid #dfd8cc;padding:0 0 26px;display:flex;align-items:center;justify-content:space-between;gap:30px}.all-chip{border:0;background:#2e261f;color:#fff;border-radius:5px;padding:13px 22px;font-size:10px;font-weight:700;letter-spacing:.14em;cursor:pointer}.all-chip.inactive{background:transparent;color:#4d443d;border:1px solid #d8d0c4}
-        .product-search{width:min(330px,100%);display:flex;align-items:center;gap:9px;border-bottom:1px solid #a69b8f;padding:7px 2px}.product-search span{font-size:19px;color:#6e645b}.product-search input{width:100%;border:0;outline:0;background:transparent;color:#312a24;font-size:12px}.product-search input::placeholder{color:#aaa096}
-        .category-tabs{display:flex;align-items:center;gap:38px;padding:32px 0 29px;overflow:auto;scrollbar-width:none}.category-tabs::-webkit-scrollbar{display:none}.category-tabs button{position:relative;border:0;background:transparent;padding:8px 0;white-space:nowrap;font-size:10px;letter-spacing:.17em;color:#756b62;cursor:pointer}.category-tabs button.active{font-weight:700;color:#312a24}.category-tabs button.active:after{content:"";position:absolute;height:1px;background:#312a24;left:0;right:0;bottom:-4px}
-        .products-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px 20px}.product-card{border:1px solid #dfd7cb;background:rgba(255,255,255,.2);border-radius:6px;overflow:hidden;transition:transform .28s,box-shadow .28s}.product-card:hover{transform:translateY(-3px);box-shadow:0 18px 46px rgba(65,51,39,.08)}.product-image-wrap{position:relative;aspect-ratio:1.1/1;overflow:hidden;background:#eee7dc}.product-image-wrap img{width:100%;height:100%;display:block;object-fit:cover;transition:transform .55s}.product-card:hover .product-image-wrap img{transform:scale(1.025)}.featured-badge{position:absolute;top:14px;left:14px;background:#264d3a;color:#fff;border-radius:2px;padding:7px 11px;font-size:9px;letter-spacing:.13em;font-weight:700}.product-card-body{padding:21px 20px 24px}.product-category{font-size:9px;letter-spacing:.17em;color:#a27643;text-transform:uppercase;margin:0 0 12px}.product-card h2{font-family:"Uguumj Noto Serif",Georgia,serif;font-size:23px;font-weight:400;margin:0 0 11px;line-height:1.2}.product-description{font-size:12px;line-height:1.6;color:#776d64;min-height:38px;margin:0 0 21px}.product-link{display:inline-flex;align-items:center;gap:12px;font-size:12px}.product-link span{transition:transform .2s}.product-card:hover .product-link span{transform:translateX(4px)}
+        .products-controls{border-bottom:1px solid #dfd8cc;padding:0 0 26px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+        .filter-chips{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+        .filter-chip{border:1px solid #d8d0c4;background:transparent;color:#61584f;border-radius:999px;padding:10px 17px;font-size:9px;font-weight:700;letter-spacing:.12em;cursor:pointer;transition:background .2s,color .2s,border-color .2s}
+        .filter-chip:hover,.filter-chip.active{background:#2e261f;color:#fff;border-color:#2e261f}
+        .product-search{width:min(300px,100%);display:flex;align-items:center;gap:9px;border:1px solid #ddd5c9;border-radius:999px;padding:10px 15px;background:rgba(255,255,255,.25)}
+        .product-search span{font-size:18px;color:#6e645b}.product-search input{width:100%;border:0;outline:0;background:transparent;color:#312a24;font-size:11px}.product-search input::placeholder{color:#aaa096}
+        .products-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:28px}
+        .product-card{border:1px solid #dfd7cb;background:rgba(255,255,255,.34);border-radius:12px;overflow:hidden;transition:transform .28s,box-shadow .28s}
+        .product-card:hover{transform:translateY(-4px);box-shadow:0 18px 46px rgba(65,51,39,.09)}
+        .product-image-wrap{position:relative;aspect-ratio:1.62/1;overflow:hidden;background:#eee7dc}
+        .product-image-wrap img{width:100%;height:100%;display:block;object-fit:cover;transition:transform .55s}.product-card:hover .product-image-wrap img{transform:scale(1.025)}
+        .featured-badge{position:absolute;top:13px;left:13px;background:#264d3a;color:#fff;border-radius:4px;padding:7px 11px;font-size:8px;letter-spacing:.13em;font-weight:700}
+        .product-card-body{position:relative;padding:15px 44px 16px 16px;border-top:1px solid #e4ddd2;background:rgba(250,247,240,.8)}
+        .product-category{font-size:8px;letter-spacing:.16em;color:#a27643;text-transform:uppercase;margin:0 0 6px}
+        .product-card h2{font-family:"Uguumj Noto Serif",Georgia,serif;font-size:18px;font-weight:400;margin:0 0 4px;line-height:1.2}
+        .product-description{font-size:10px;line-height:1.45;color:#776d64;min-height:28px;margin:0}
+        .product-link{position:absolute;right:16px;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:26px;height:26px;border-radius:50%;font-size:0}
+        .product-link span{font-size:17px;transition:transform .2s}.product-card:hover .product-link span{transform:translateX(3px)}
         .products-empty{padding:70px 0;text-align:center;color:#887e74;font-size:14px}
         .wholesale-panel{margin-top:38px;border:1px solid #ddd5c9;border-radius:6px;padding:28px 36px;display:grid;grid-template-columns:80px 1fr auto;align-items:center;gap:24px;background:rgba(255,255,255,.14)}.wholesale-icon{width:58px;height:58px;border-radius:50%;display:grid;place-items:center;background:#eee3d2;font-size:24px}.wholesale-panel h3{font-family:"Uguumj Noto Serif",Georgia,serif;font-size:25px;font-weight:400;margin:0 0 7px}.wholesale-panel p{font-size:11px;color:#81776e;margin:0;line-height:1.55}.wholesale-button{background:#2c251f;color:#fff!important;border-radius:5px;padding:17px 27px;font-size:10px;letter-spacing:.14em;font-weight:700;display:inline-flex;gap:22px;align-items:center}
         @media(max-width:1080px){.products-header{grid-template-columns:120px 1fr auto}.products-nav{display:none}.mobile-menu-button{display:block}.products-hero{grid-template-columns:1fr;gap:24px}.products-intro{max-width:600px}.products-grid{grid-template-columns:repeat(2,1fr)}}
-        @media(max-width:680px){.products-header{height:76px;padding:0 20px;grid-template-columns:1fr auto}.products-logo img{height:43px}.header-search-icon,.cart-icon{display:none}.products-shell{width:min(100% - 32px,1160px);padding-top:42px}.products-hero{padding:12px 0 42px}.products-title{font-size:50px}.products-controls{align-items:stretch;flex-direction:column}.product-search{width:100%}.category-tabs{gap:27px;padding-top:24px}.products-grid{grid-template-columns:1fr}.wholesale-panel{grid-template-columns:58px 1fr;padding:24px}.wholesale-button{grid-column:1/-1;justify-content:center}.product-description{min-height:0}}
+        @media(max-width:680px){.products-header{height:76px;padding:0 20px;grid-template-columns:1fr auto}.products-logo img{height:43px}.header-search-icon,.cart-icon{display:none}.products-shell{width:min(100% - 32px,1160px);padding-top:42px}.products-hero{padding:12px 0 42px}.products-title{font-size:50px}.products-controls{align-items:stretch;flex-direction:column}.filter-chips{overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;scrollbar-width:none}.filter-chips::-webkit-scrollbar{display:none}.product-search{width:100%}.products-grid{grid-template-columns:1fr}.wholesale-panel{grid-template-columns:58px 1fr;padding:24px}.wholesale-button{grid-column:1/-1;justify-content:center}.product-description{min-height:0}}
       `}</style>
       <Header lang={lang} onLanguage={setLang} />
       <div className="products-shell">
@@ -276,18 +290,16 @@ export default function ProductsClient() {
 
         <section id="products">
           <div className="products-controls">
-            <button className={selectedCategory === "all" ? "all-chip" : "all-chip inactive"} type="button" onClick={() => setSelectedCategory("all")}>{t.all}</button>
+            <div className="filter-chips">
+              <button className={selectedCategory === "all" ? "filter-chip active" : "filter-chip"} type="button" onClick={() => setSelectedCategory("all")}>{t.all}</button>
+              {categories.map((category) => (
+                <button className={selectedCategory === category.key ? "filter-chip active" : "filter-chip"} type="button" onClick={() => setSelectedCategory(category.key)} key={category.key}>{category.label.toUpperCase()}</button>
+              ))}
+            </div>
             <label className="product-search">
               <span aria-hidden="true">⌕</span>
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} />
             </label>
-          </div>
-
-          <div className="category-tabs">
-            <button className={selectedCategory === "all" ? "active" : ""} type="button" onClick={() => setSelectedCategory("all")}>{t.all}</button>
-            {categories.map((category) => (
-              <button className={selectedCategory === category.key ? "active" : ""} type="button" onClick={() => setSelectedCategory(category.key)} key={category.key}>{category.label.toUpperCase()}</button>
-            ))}
           </div>
 
           {visibleProducts.length ? (
