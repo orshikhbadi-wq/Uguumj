@@ -1217,4 +1217,10 @@
     },
     {
       "setting_key": "minimum_order_scope",
-    
+      "setting_value": "PRODUCT_SUBTOTAL",
+      "description": "Minimum order rule applies to product subtotal before delivery fee",
+      "data_type": "text",
+      "updated_at": "2026-09-02 00:00:00"
+    }
+  ]
+}
