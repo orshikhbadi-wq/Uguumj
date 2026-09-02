@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 type Language = "mn" | "en";
 type AccountMode = "b2c" | "b2b";
@@ -35,7 +35,6 @@ export default function UguumjArkhadPrototype() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const t = copy[language];
-  useEffect(() => { if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined); }, []);
   const visibleProducts = useMemo(() => category === "Бүгд" ? products : products.filter((product) => product.category === category), [category]);
   const cartItems = products.filter((product) => cart[product.id]);
   const cartCount = Object.values(cart).reduce((sum, quantity) => sum + quantity, 0);

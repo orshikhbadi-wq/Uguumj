@@ -3,6 +3,7 @@ import AdminClient from "../admin/AdminClient";
 import RebaClient from "../reba/RebaClient";
 import WholesaleStoreClient from "../store/WholesaleStoreClient";
 import UguumjArkhadPrototype from "../UguumjArkhadPrototype";
+import LegacyHomeClient from "../LegacyHomeClient";
 
 export default async function SiteRoute({ params }: { params: Promise<{ slug?: string[] }> }) {
   const route = await params;
@@ -11,11 +12,5 @@ export default async function SiteRoute({ params }: { params: Promise<{ slug?: s
   if (route.slug?.join("/") === "shop") return <UguumjArkhadPrototype />;
   if (route.slug?.join("/") === "wholesale") return <WholesaleStoreClient />;
 
-  return (
-    <>
-      <div id="root" />
-      <script src="/legacy/bootstrap.js" />
-      <script type="module" src="/legacy/assets/index-Bx44nbsr.js" />
-    </>
-  );
+  return <LegacyHomeClient />;
 }

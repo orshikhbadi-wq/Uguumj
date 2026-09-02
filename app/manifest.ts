@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Өгөөмж Архад ХХК-ийн бүтээгдэхүүн, үйлдвэр болон онлайн захиалга.",
     start_url: "/",
     display: "standalone",
-    background_color: "#f4efe5",
-    theme_color: "#233a2c",
+    background_color: "#FFFFFF",
+    theme_color: "#F00028",
     lang: "mn",
     icons: [{ src: "/favicon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
   };

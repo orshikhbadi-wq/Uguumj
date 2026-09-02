@@ -13,28 +13,13 @@
   };
   const resolve = (value) => value?.startsWith("/objects/") ? `/api/storage${value}` : value;
   const images = {};
-  const bindStoreCart = () => {
-    document.querySelectorAll('button[aria-label="Shopping cart"]').forEach((button) => {
-      if (button.dataset.storeCartBound === "true") return;
-      button.dataset.storeCartBound = "true";
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        window.location.assign("/wholesale?view=cart");
-      }, true);
-    });
-  };
-  const apply = () => {
-    document.querySelectorAll("img").forEach((image) => {
-      const source = image.getAttribute("src") || "";
-      for (const [key, fallbacks] of Object.entries(sections)) {
-        const files = Array.isArray(fallbacks) ? fallbacks : [fallbacks];
-        if (images[key] && files.some((fallback) => source.includes(fallback)) && image.getAttribute("src") !== resolve(images[key])) image.setAttribute("src", resolve(images[key]));
-      }
-    });
-    bindStoreCart();
-  };
-  Promise.all(Object.keys(sections).map(async (key) => { try { const response = await fetch(`/api/content/${key}`); const data = await response.json(); if (data.content?.image_url) images[key] = data.content.image_url; } catch { /* keep bundled image */ } })).then(apply);
+  const apply = () => document.querySelectorAll("img").forEach((image) => {
+    const source = image.getAttribute("src") || "";
+    for (const [key, fallbacks] of Object.entries(sections)) {
+      const files = Array.isArray(fallbacks) ? fallbacks : [fallbacks];
+      if (images[key] && files.some((fallback) => source.includes(fallback)) && image.getAttribute("src") !== resolve(images[key])) image.setAttribute("src", resolve(images[key]));
+    }
+  });
+  window.__uguumjLegacyContentReady = Promise.all(Object.keys(sections).map(async (key) => { try { const response = await fetch(`/api/content/${key}`); const data = await response.json(); if (data.content?.image_url) images[key] = data.content.image_url; } catch { /* keep bundled image */ } })).then(() => { apply(); });
   new MutationObserver(apply).observe(document.documentElement, { childList: true, subtree: true });
-  apply();
 })();
