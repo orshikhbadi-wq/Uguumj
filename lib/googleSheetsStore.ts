@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
 
-const DEFAULT_SHEET_ID = "1aSXR7LSSiw-grl9ALPXhsX8DWLMUaNPKgNn6hrpxY_E";
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -25,6 +24,18 @@ export type StoreProduct = {
   status: string;
   featured: boolean;
   imageUrl: string;
+  shortDescriptionMn?: string;
+  shortDescriptionEn?: string;
+  ingredientsMn?: string;
+  ingredientsEn?: string;
+  allergensMn?: string;
+  allergensEn?: string;
+  nutritionMn?: string;
+  nutritionEn?: string;
+  storageMn?: string;
+  storageEn?: string;
+  packageMn?: string;
+  packageEn?: string;
   weight: string;
   unit: string;
 };
@@ -57,69 +68,10 @@ type ServiceAccount = {
 type ProductRecord = {
   product: StoreProduct;
   sheetRowIndex: number;
+  stockColumnIndex: number;
 };
 
 type SheetIds = Record<"01_Products" | "03_Customers" | "04_Orders" | "05_Order_Items" | "06_Inventory" | "07_Payments", number>;
-
-export const PROTOTYPE_PRODUCTS: StoreProduct[] = [
-  {
-    id: "PRD-BITY-SEED",
-    sku: "BITY-SEED",
-    nameMn: "Bity Seed",
-    nameEn: "Bity Seed",
-    categoryId: "cookies",
-    categoryNameMn: "Жигнэмэг",
-    categoryNameEn: "Cookies",
-    descriptionMn: "Олон төрлийн үр, овьёостой жигнэмэг.",
-    descriptionEn: "Seed and oat cookie for everyday snacking.",
-    price: 8800,
-    salePrice: null,
-    stockQuantity: 120,
-    status: "active",
-    featured: true,
-    imageUrl: "/legacy/assets/products-texture-Def4-lGY.jpg",
-    weight: "",
-    unit: "ш",
-  },
-  {
-    id: "PRD-BITY-FIT",
-    sku: "BITY-FIT",
-    nameMn: "Bity Fit",
-    nameEn: "Bity Fit",
-    categoryId: "cookies",
-    categoryNameMn: "Жигнэмэг",
-    categoryNameEn: "Cookies",
-    descriptionMn: "Өдөр тутмын амтлах мөчид зориулсан сонголт.",
-    descriptionEn: "A balanced everyday snack choice.",
-    price: 9200,
-    salePrice: null,
-    stockQuantity: 96,
-    status: "active",
-    featured: true,
-    imageUrl: "/legacy/assets/products-pastry-DzYn-Waa.jpg",
-    weight: "",
-    unit: "ш",
-  },
-  {
-    id: "PRD-GOLDEN-TOAST",
-    sku: "GOLDEN-TOAST",
-    nameMn: "Шар тост",
-    nameEn: "Golden Toast",
-    categoryId: "bread",
-    categoryNameMn: "Талх",
-    categoryNameEn: "Bread",
-    descriptionMn: "Өглөөний цай болон өдөр тутмын хэрэглээнд тохиромжтой талх.",
-    descriptionEn: "Soft toast bread for breakfast and everyday use.",
-    price: 6500,
-    salePrice: null,
-    stockQuantity: 80,
-    status: "active",
-    featured: true,
-    imageUrl: "/legacy/assets/products-bread-827gvz_9.jpg",
-    weight: "",
-    unit: "ш",
-  },
-];
 
 let tokenCache: { value: string; expiresAt: number } | null = null;
 let sheetIdCache: SheetIds | null = null;
@@ -158,7 +110,7 @@ function serviceAccount(): ServiceAccount | null {
 }
 
 export function googleSheetsConfigured() {
-  return Boolean(serviceAccount());
+  return Boolean(serviceAccount() && runtime.GOOGLE_SHEET_ID?.trim());
 }
 
 async function accessToken() {
@@ -204,7 +156,9 @@ async function accessToken() {
 }
 
 function spreadsheetId() {
-  return runtime.GOOGLE_SHEET_ID || DEFAULT_SHEET_ID;
+  const id = runtime.GOOGLE_SHEET_ID?.trim();
+  if (!id) throw new Error("Google Sheet ID is not configured");
+  return id;
 }
 
 async function sheetsRequest(path: string, init: RequestInit = {}) {
@@ -259,7 +213,7 @@ function effectivePrice(product: StoreProduct) {
 
 async function readProductRecords() {
   const [productRows, categoryRows] = await Promise.all([
-    readValues("'01_Products'!A1:R1000"),
+    readValues("'01_Products'!A1:AZ10000"),
     readValues("'02_Categories'!A1:H500"),
   ]);
   if (productRows.length < 2) return [] as ProductRecord[];
@@ -299,182 +253,4 @@ async function readProductRecords() {
       status: text(item.status) || "active",
       featured: bool(item.featured),
       imageUrl: text(item.image_url),
-      weight: text(item.weight),
-      unit: text(item.unit),
-    };
-    return { product, sheetRowIndex: index + 1 } satisfies ProductRecord;
-  }).filter((record): record is ProductRecord => record !== null);
-}
-
-export async function readStoreProducts(): Promise<StoreProduct[] | null> {
-  if (!googleSheetsConfigured()) return null;
-  const records = await readProductRecords();
-  return records.map((record) => record.product);
-}
-
-function compactId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
-}
-
-function makeOrderNumber() {
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase();
-  return `UG-${date}-${suffix}`;
-}
-
-function extendedValue(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) return { numberValue: value };
-  if (typeof value === "boolean") return { boolValue: value };
-  return { stringValue: value == null ? "" : String(value) };
-}
-
-function appendCells(sheetId: number, rows: unknown[][]) {
-  return {
-    appendCells: {
-      sheetId,
-      rows: rows.map((row) => ({ values: row.map((value) => ({ userEnteredValue: extendedValue(value) })) })),
-      fields: "userEnteredValue",
-    },
-  };
-}
-
-async function storeSheetIds(): Promise<SheetIds> {
-  if (sheetIdCache) return sheetIdCache;
-  const response = await sheetsRequest("?fields=sheets.properties(sheetId,title)");
-  const payload = await response.json() as { sheets?: Array<{ properties?: { sheetId?: number; title?: string } }> };
-  const found = new Map<string, number>();
-  for (const sheet of payload.sheets ?? []) {
-    if (sheet.properties?.title && typeof sheet.properties.sheetId === "number") found.set(sheet.properties.title, sheet.properties.sheetId);
-  }
-  const required = ["01_Products", "03_Customers", "04_Orders", "05_Order_Items", "06_Inventory", "07_Payments"] as const;
-  for (const title of required) if (!found.has(title)) throw new Error(`Required Google Sheet tab is missing: ${title}`);
-  sheetIdCache = Object.fromEntries(required.map((title) => [title, found.get(title)!])) as SheetIds;
-  return sheetIdCache;
-}
-
-export class StoreCheckoutError extends Error {
-  constructor(message: string, public code: "PRODUCT_NOT_FOUND" | "OUT_OF_STOCK" | "INVALID_PRICE") {
-    super(message);
-    this.name = "StoreCheckoutError";
-  }
-}
-
-export async function appendStoreOrder(input: StoreCheckoutInput) {
-  if (!googleSheetsConfigured()) return null;
-
-  const [records, ids] = await Promise.all([readProductRecords(), storeSheetIds()]);
-  const productMap = new Map(records.map((record) => [record.product.id, record]));
-  const requested = new Map<string, number>();
-  for (const item of input.items) requested.set(item.productId, (requested.get(item.productId) ?? 0) + item.quantity);
-
-  const trustedItems = [...requested.entries()].map(([productId, quantity]) => {
-    const record = productMap.get(productId);
-    if (!record) throw new StoreCheckoutError("A product is no longer available", "PRODUCT_NOT_FOUND");
-    const price = effectivePrice(record.product);
-    if (price <= 0) throw new StoreCheckoutError("A product does not have an orderable price", "INVALID_PRICE");
-    if (quantity > record.product.stockQuantity) throw new StoreCheckoutError("Requested quantity exceeds current stock", "OUT_OF_STOCK");
-    return { record, quantity, unitPrice: price, stockAfter: record.product.stockQuantity - quantity };
-  });
-
-  const now = new Date().toISOString();
-  const customerId = compactId("CUS");
-  const orderId = compactId("ORD");
-  const paymentId = compactId("PAY");
-  const number = makeOrderNumber();
-  const subtotal = trustedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const deliveryFee = Math.max(0, Number(input.deliveryFee || 0));
-  const discount = Math.min(subtotal + deliveryFee, Math.max(0, Number(input.discount || 0)));
-  const total = Math.max(0, subtotal + deliveryFee - discount);
-  const customerName = [input.customer.firstName, input.customer.lastName].filter(Boolean).join(" ").trim();
-
-  const requests: Record<string, unknown>[] = trustedItems.map(({ record, stockAfter }) => ({
-    updateCells: {
-      range: {
-        sheetId: ids["01_Products"],
-        startRowIndex: record.sheetRowIndex,
-        endRowIndex: record.sheetRowIndex + 1,
-        startColumnIndex: 9,
-        endColumnIndex: 10,
-      },
-      rows: [{ values: [{ userEnteredValue: { numberValue: stockAfter } }] }],
-      fields: "userEnteredValue",
-    },
-  }));
-
-  requests.push(
-    appendCells(ids["03_Customers"], [[
-      customerId,
-      input.customer.firstName,
-      input.customer.lastName || "",
-      input.customer.phone,
-      input.customer.email || "",
-      input.customer.cityDistrict,
-      input.customer.deliveryAddress,
-      now,
-      now,
-      "Online store checkout",
-    ]]),
-    appendCells(ids["04_Orders"], [[
-      orderId,
-      number,
-      customerId,
-      customerName,
-      input.customer.phone,
-      `${input.customer.cityDistrict} · ${input.customer.deliveryAddress}`,
-      subtotal,
-      deliveryFee,
-      discount,
-      total,
-      input.paymentMethod,
-      "PENDING",
-      "NEW",
-      input.deliveryMethod,
-      now,
-      now,
-      input.notes || "",
-    ]]),
-    appendCells(ids["05_Order_Items"], trustedItems.map(({ record, quantity, unitPrice }) => [
-      compactId("ITM"),
-      orderId,
-      record.product.id,
-      record.product.sku,
-      record.product.nameMn || record.product.nameEn,
-      quantity,
-      unitPrice,
-      0,
-      quantity * unitPrice,
-      "",
-    ])),
-    appendCells(ids["06_Inventory"], trustedItems.map(({ record, quantity, stockAfter }) => [
-      compactId("INV"),
-      record.product.id,
-      record.product.sku,
-      "SALE",
-      -quantity,
-      stockAfter,
-      "ORDER",
-      orderId,
-      now,
-      `Online order ${number}`,
-    ])),
-    appendCells(ids["07_Payments"], [[
-      paymentId,
-      orderId,
-      input.paymentMethod,
-      "",
-      total,
-      "MNT",
-      "PENDING",
-      "",
-      now,
-      "Payment details are handled by the payment provider; never store card credentials here.",
-    ]]),
-  );
-
-  await sheetsRequest(":batchUpdate", {
-    method: "POST",
-    body: JSON.stringify({ requests }),
-  });
-
-  return { orderId, orderNumber: number, customerId, subtotal, deliveryFee, discount, total, storage: "google-sheets" as const };
-}
+      shortDescriptionMn: tex

@@ -1,29 +1,34 @@
-# Uguumj online store — Google Sheets connection
+# Uguumj prototype store — server configuration
 
-The `/wholesale` page is the Uguumj online store. The store API is ready to use the existing Google Sheet:
+Canonical route: `/store`. `/wholesale` redirects to `/store`, preserving cart or checkout view.
 
-- Spreadsheet: `Uguumj Online Store Database`
-- Default spreadsheet ID: `1aSXR7LSSiw-grl9ALPXhsX8DWLMUaNPKgNn6hrpxY_E`
-- Product source: `01_Products` and `02_Categories`
-- Checkout writes: `03_Customers`, `04_Orders`, `05_Order_Items`, `06_Inventory`, `07_Payments`
+The only permitted store database is the existing `Uguumj Online Store Database`.
+No spreadsheet is created by this application. No sample catalogue or successful demo checkout fallback exists.
 
-## Production connection
+## Required hosting configuration
 
-1. In the Google Cloud project used for the website, enable the **Google Sheets API**.
-2. Create a dedicated service account for the store backend. Do not use a personal Google account credential.
-3. Share `Uguumj Online Store Database` with the service account email as **Editor**. Do not make the sheet public.
-4. Add the complete service-account JSON as the hosting secret `GOOGLE_SERVICE_ACCOUNT_JSON`.
-5. `GOOGLE_SHEET_ID` is optional. If omitted, the code uses the spreadsheet ID above.
-6. Redeploy the site and open `/wholesale`. The data-source label should change from `Prototype data` to `Google Sheets database`.
+- `GOOGLE_SHEET_ID`: required environment variable containing the ID of the existing spreadsheet. Confirm it against the actual connected document; no default ID is assumed.
+- `GOOGLE_SERVICE_ACCOUNT_JSON`: required secret containing the service account JSON with `client_email` and `private_key`.
 
-Never commit the service-account JSON to GitHub. The credential belongs only in the hosting secret manager.
+Use the Sites server-side secret/environment configuration, never source files, frontend variables, or Git.
+Share only the existing spreadsheet with the dedicated service account as Editor. Do not make it public or grant broad Drive access. Enable Google Sheets API for the service account project. The application requests only the spreadsheets OAuth scope.
 
-## Security behavior
+No real credentials are supplied in this repository. A ChatGPT Google Drive connection does not by itself configure the website's runtime credentials.
 
-Checkout never trusts price, product name, SKU, or totals supplied by the browser. The server re-reads the product row from Google Sheets, validates current stock, calculates the trusted price/total, and then writes the order.
+## Verification before opening checkout
 
-Order creation uses one Google Sheets `spreadsheets.batchUpdate` request to update product stock and append customer, order-item, inventory, order, and payment rows together. Cell values are written as typed values instead of formulas, which prevents spreadsheet-formula injection from customer text.
+The current deployment can show the store interface without credentials. Its catalogue and checkout APIs return controlled errors until both values are configured. This is not evidence that the database is connected.
 
-The Sheets version is intended for prototype/early sales volume. Google Sheets does not provide database-grade row locking for simultaneous checkout requests. The planned migration to Cloud SQL PostgreSQL should happen before high-concurrency production sales.
+After configuration, verify the actual headers and column mapping against all eight tabs, read products/categories/settings, and run one clearly identified test order. Confirm customer, order, order items, inventory movements, payment, and stock directly in Sheets. Do not claim that test has happened without those checks.
 
-The application never stores card numbers, CVV, PINs, online-banking passwords, or similar payment credentials. `07_Payments` stores only order/payment-provider references, amount, currency, and status.
+The current adapter must still be reconciled with the real sheet schema before enabling sales. In particular its legacy write column order needs checking, settings need wiring, customer matching needs verification, and simultaneous checkouts require serialization to avoid lost stock updates. A single Sheets batch write is not a lock around the preceding stock read. This prototype is not ready for customer sales merely because its interface is published.
+
+## Security
+
+Google credentials are used only in `lib/googleSheetsStore.ts`, imported by server API routes. They are not returned to clients. Order writes use typed string cells for customer text rather than formula values. Checkout prices are read server-side; connection failures never generate an order number or success confirmation. QPay is not configured and no payment is marked paid.
+
+## Optional product detail columns
+
+The product reader supports `short_description_mn/en`, `description_mn/en`, `ingredients_mn/en`, `allergens_mn/en`, `nutrition_mn/en`, `storage_mn/en`, `package_mn/en`, and `weight`. Add the actual values to the existing product tab after access is configured. No fields or rows have been remotely added as part of this change. Empty accordion sections are hidden.
+
+Product columns are read by header name through AZ. Stock writes locate `stock_quantity` by header rather than column position. Order item writes locate all eight required fields by header and abort before writing if those fields are missing. Selected quantities and unit-price snapshots are preserved.

@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { addCartQuantity } from "./cartQuantity";
+import ProductDetail from "./ProductDetail";
+import type { StoreProduct } from "../../lib/googleSheetsStore";
+import StoreHeader from "./StoreHeader";
 import ScrollReveal from "../components/ScrollReveal";
 
 type Lang = "mn" | "en";
 type View = "shop" | "cart" | "checkout" | "success";
-type Product = {
-  id: string; sku: string; nameMn: string; nameEn: string; categoryId: string;
-  categoryNameMn?: string; categoryNameEn?: string; descriptionMn: string; descriptionEn: string;
-  price: number; salePrice?: number | null; stockQuantity: number; status: string; featured: boolean;
-  imageUrl: string; weight: string; unit: string;
-};
+type Product = StoreProduct;
 type Customer = {
   firstName: string; lastName: string; phone: string; email: string; cityDistrict: string;
   deliveryAddress: string; notes: string; deliveryMethod: "DELIVERY" | "PICKUP";
@@ -18,17 +17,10 @@ type Customer = {
 };
 
 const CART_KEY = "uguumj-online-store-cart-v1";
-const DEMO_ORDERS_KEY = "uguumj-online-store-demo-orders-v1";
 const EMPTY_CUSTOMER: Customer = {
   firstName: "", lastName: "", phone: "", email: "", cityDistrict: "", deliveryAddress: "", notes: "",
   deliveryMethod: "DELIVERY", paymentMethod: "BANK_TRANSFER",
 };
-const NAV = [
-  ["НҮҮР", "HOME", "/"], ["БИДНИЙ ТУХАЙ", "ABOUT", "/#history"], ["БҮТЭЭГДЭХҮҮН", "PRODUCTS", "/products"],
-  ["ҮЙЛДВЭР", "FACTORY", "/#manufacturing"], ["БӨӨНИЙ ХУДАЛДАА", "WHOLESALE", "/wholesale"],
-  ["КАРЬЕР", "CAREERS", "/careers"], ["ХОЛБОО БАРИХ", "CONTACT", "/contact"],
-] as const;
-
 const money = (value: number) => `${new Intl.NumberFormat("mn-MN").format(value)}₮`;
 const priceOf = (product: Product) => product.salePrice && product.salePrice > 0 ? product.salePrice : product.price;
 const nameOf = (product: Product, lang: Lang) => (lang === "mn" ? product.nameMn : product.nameEn) || product.nameMn || product.nameEn || product.sku;
@@ -39,11 +31,12 @@ export default function WholesaleStoreClient() {
   const [lang, setLang] = useState<Lang>("mn");
   const [view, setView] = useState<View>("shop");
   const [products, setProducts] = useState<Product[]>([]);
-  const [source, setSource] = useState("prototype");
+
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [category, setCategory] = useState("ALL");
   const [query, setQuery] = useState("");
+  const [cartLoaded, setCartLoaded] = useState(false);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<Product | null>(null);
   const [customer, setCustomer] = useState<Customer>(EMPTY_CUSTOMER);
@@ -51,22 +44,26 @@ export default function WholesaleStoreClient() {
   const [formError, setFormError] = useState("");
   const [orderNumber, setOrderNumber] = useState("");
   const [notice, setNotice] = useState("");
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     try {
       const savedLang = localStorage.getItem("uguumj-lang");
       if (savedLang === "en") setLang("en");
       const savedCart = localStorage.getItem(CART_KEY);
-      if (savedCart) setCart(JSON.parse(savedCart));
+      if (savedCart) {
+        const value = JSON.parse(savedCart);
+        if (value && typeof value === "object" && !Array.isArray(value)) setCart(Object.fromEntries(Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isInteger(entry[1]) && entry[1] > 0 && entry[1] <= 10000)));
+      }
       const requested = new URLSearchParams(window.location.search).get("view");
       if (requested === "cart" || requested === "checkout") setView(requested);
     } catch { /* local storage is optional */ }
+    setCartLoaded(true);
   }, []);
 
   useEffect(() => {
+    if (!cartLoaded) return;
     try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* optional */ }
-  }, [cart]);
+  }, [cart, cartLoaded]);
 
   useEffect(() => {
     let active = true;
@@ -80,7 +77,7 @@ export default function WholesaleStoreClient() {
       .then((payload) => {
         if (!active) return;
         setProducts(Array.isArray(payload.products) ? payload.products : []);
-        setSource(payload.source || "prototype");
+
         setLoadError("");
       })
       .catch(() => {
@@ -132,114 +129,4 @@ export default function WholesaleStoreClient() {
     subtotal: "Subtotal", deliveryNote: "Delivery cost will be confirmed with your order.",
     checkoutTitle: "Checkout information", firstName: "First name *", lastName: "Last name", phone: "Phone *", email: "Email",
     district: "City / District *", address: "Delivery address *", note: "Order notes",
-    delivery: "Delivery method", deliveryOption: "Delivery", pickup: "Pick up",
-    payment: "Payment method", bank: "Bank transfer", qpay: "QPay (pending until confirmed)",
-    place: "Place order", sending: "Submitting…", success: "Order received",
-    successBody: "Our sales team will review your order and confirm payment and delivery details.",
-    orderNo: "Order number", back: "Back to store", stock: "Stock", sheet: "Google Sheets database", prototype: "Prototype data",
-  };
-
-  function go(next: View) {
-    setView(next); setFormError(""); setMobileOpen(false);
-    const url = new URL(window.location.href);
-    if (next === "shop" || next === "success") url.searchParams.delete("view"); else url.searchParams.set("view", next);
-    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function add(product: Product) {
-    if (priceOf(product) <= 0 || product.stockQuantity <= 0) return;
-    setCart((current) => ({ ...current, [product.id]: Math.min(product.stockQuantity, (current[product.id] || 0) + 1) }));
-    setNotice(lang === "mn" ? `${nameOf(product, lang)} сагсанд нэмэгдлээ` : `${nameOf(product, lang)} added to cart`);
-    window.setTimeout(() => setNotice(""), 2200);
-  }
-
-  function changeQty(product: Product, delta: number) {
-    setCart((current) => {
-      const next = Math.max(0, Math.min(product.stockQuantity, (current[product.id] || 0) + delta));
-      const updated = { ...current };
-      if (next === 0) delete updated[product.id]; else updated[product.id] = next;
-      return updated;
-    });
-  }
-
-  async function submitOrder(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setFormError("");
-    if (!customer.firstName.trim() || !customer.phone.trim() || !customer.cityDistrict.trim() || !customer.deliveryAddress.trim()) {
-      setFormError(lang === "mn" ? "Нэр, утас, дүүрэг/хороо болон хүргэлтийн хаягаа бөглөнө үү." : "Please enter your name, phone, district and delivery address.");
-      return;
-    }
-    if (!cartProducts.length) { setFormError(copy.empty); return; }
-    setSubmitting(true);
-    const payload = {
-      customer,
-      items: cartProducts.map((product) => ({ productId: product.id, quantity: cart[product.id] })),
-      paymentMethod: customer.paymentMethod, deliveryMethod: customer.deliveryMethod, notes: customer.notes,
-    };
-    try {
-      const response = await fetch("/api/store/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json() as { orderNumber?: string; storage?: string; error?: string };
-      if (!response.ok || !result.orderNumber) throw new Error(result.error || "Order failed");
-      if (result.storage === "prototype") {
-        try {
-          const orders = JSON.parse(localStorage.getItem(DEMO_ORDERS_KEY) || "[]") as unknown[];
-          orders.push({ orderNumber: result.orderNumber, createdAt: new Date().toISOString(), ...payload });
-          localStorage.setItem(DEMO_ORDERS_KEY, JSON.stringify(orders.slice(-30)));
-        } catch { /* prototype-only backup */ }
-      }
-      setOrderNumber(result.orderNumber); setCart({}); setCustomer(EMPTY_CUSTOMER); go("success");
-    } catch {
-      setFormError(lang === "mn" ? "Захиалга илгээхэд алдаа гарлаа. Дахин оролдоно уу." : "We couldn't submit the order. Please try again.");
-    } finally { setSubmitting(false); }
-  }
-
-  const field = (key: "firstName" | "lastName" | "phone" | "email" | "cityDistrict" | "deliveryAddress", label: string, wide = false) => (
-    <label className={wide ? "md:col-span-2" : ""}>
-      <span className="mb-2 block text-[10px] tracking-[.14em] text-[#5C3C2B]">{label}</span>
-      <input type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} value={customer[key]}
-        onChange={(event: ChangeEvent<HTMLInputElement>) => setCustomer((current) => ({ ...current, [key]: event.target.value }))}
-        className="w-full border border-[#F1EBDD] bg-[#FFFFFF] px-4 py-3 text-sm outline-none focus:border-[#F00028]" />
-    </label>
-  );
-
-  return <main className="min-h-screen bg-[#FFFFFF] text-[#1A1A1A]" style={{ fontFamily: "var(--app-font-sans), sans-serif" }}>
-    <header className="sticky top-0 z-40 border-b border-[#F1EBDD] bg-[#FFFFFF]/95 ">
-      <div className="mx-auto flex h-20 max-w-[1540px] items-center gap-5 px-5 md:h-24 md:px-10 lg:px-14">
-        <a href="/" aria-label="Өгөөмж Архад"><img src="/assets/logo_white_1785392965249-DiLOaFs8.png" alt="Өгөөмж Архад" className="h-12 w-auto md:h-14" style={{ filter: "invert(1) sepia(.18) saturate(.55) brightness(.32)" }} /></a>
-        <nav className="hidden flex-1 justify-center xl:flex">
-          {NAV.map(([mn, en, href]) => <a key={href} href={href} className={`border-b px-3 py-3 text-[12px] font-semibold tracking-[.08em] ${href === "/wholesale" ? "border-[#F00028] text-[#5C3C2B]" : "border-transparent text-[#5C3C2B] hover:text-[#5C3C2B]"}`}>{lang === "mn" ? mn : en}</a>)}
-        </nav>
-        <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => { const next = lang === "mn" ? "en" : "mn"; setLang(next); try { localStorage.setItem("uguumj-lang", next); } catch {} }} className="px-2 py-2 text-xs tracking-[.16em] text-[#5C3C2B]">MN <span className="opacity-30">|</span> EN</button>
-          <button onClick={() => go("cart")} className="relative flex h-10 items-center gap-2 border border-[#F1EBDD] px-3 text-xs font-semibold tracking-[.12em] hover:bg-[#1A1A1A] hover:text-white" aria-label={copy.cart}>⌑ <span className="hidden sm:inline">{copy.cart}</span>{cartCount > 0 && <b className="rounded-full bg-[#F00028] px-1.5 py-0.5 text-[10px] text-white">{cartCount}</b>}</button>
-          <button onClick={() => setMobileOpen((open) => !open)} className="h-10 w-10 border border-[#F1EBDD] xl:hidden" aria-label="Menu">☰</button>
-        </div>
-      </div>
-    </header>
-    {mobileOpen && <nav className="fixed inset-x-0 top-20 z-50 border-b border-[#F1EBDD] bg-[#FFFFFF] px-5 py-4 shadow-xl md:top-24 xl:hidden">{NAV.map(([mn, en, href]) => <a key={href} href={href} className="block border-b border-[#F1EBDD] px-2 py-4 text-xs font-semibold tracking-[.12em]">{lang === "mn" ? mn : en}</a>)}</nav>}
-    {notice && <div className="fixed right-5 top-28 z-50 bg-[#F00028] px-5 py-3 text-sm text-white shadow-xl">{notice}</div>}
-
-    {view === "shop" && <>
-      <section className="border-b border-[#F1EBDD] bg-[#F1EBDD]"><div className="mx-auto grid max-w-[1540px] gap-10 px-5 py-16 md:px-10 md:py-24 lg:grid-cols-[1.3fr_.7fr] lg:px-14"><ScrollReveal from="left" duration={780}><div><p className="mb-5 text-[11px] font-bold tracking-[.22em] text-[#F00028]">{copy.eyebrow}</p><h1 className="max-w-4xl text-4xl leading-[1.05] md:text-6xl lg:text-7xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.title}</h1></div></ScrollReveal><ScrollReveal from="right" delay={120} duration={780}><p className="flex items-end text-base font-light leading-8 text-[#5C3C2B] md:text-lg">{copy.intro}</p></ScrollReveal></div></section>
-      <section className="mx-auto max-w-[1540px] px-5 py-12 md:px-10 md:py-16 lg:px-14">
-        <ScrollReveal from="bottom" delay={60}><div className="mb-10 flex flex-col gap-5 border-b border-[#F1EBDD] pb-8 lg:flex-row lg:items-center lg:justify-between"><div className="flex flex-wrap gap-2"><button onClick={() => setCategory("ALL")} className={`border px-5 py-2 text-xs tracking-[.14em] ${category === "ALL" ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}>{copy.all}</button>{categories.map(([id, label]) => <button key={id} onClick={() => setCategory(id)} className={`border px-5 py-2 text-xs tracking-[.14em] ${category === id ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}>{label}</button>)}</div><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder={copy.search} className="border-b border-[#F1EBDD] bg-transparent px-2 py-2 text-sm outline-none lg:w-80" /></div></ScrollReveal>
-        {loadError && <div className="mb-8 border border-[#F00028] bg-[#F1EBDD] px-5 py-4 text-sm text-[#F00028]">{loadError}</div>}
-        {loading ? <div className="grid grid-cols-2 gap-5 md:grid-cols-3 lg:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="aspect-[4/5] animate-pulse bg-[#F1EBDD]" />)}</div> : filtered.length === 0 ? <div className="py-24 text-center text-[#5C3C2B]">{lang === "mn" ? "Одоогоор тохирох бүтээгдэхүүн алга байна." : "No matching products are available."}</div> : <div className="grid grid-cols-2 gap-x-5 gap-y-12 md:grid-cols-3 lg:grid-cols-4">{filtered.map((product, index) => {
-          const price = priceOf(product); const sold = product.stockQuantity <= 0;
-          return <ScrollReveal key={product.id} from={index % 4 === 0 ? "left" : index % 4 === 3 ? "right" : "bottom"} delay={(index % 4) * 70} duration={700}><article className="group"><button onClick={() => setSelected(product)} className="relative block aspect-[4/5] w-full overflow-hidden bg-[#F1EBDD] text-left">{product.imageUrl ? <img src={product.imageUrl} alt={nameOf(product, lang)} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" /> : <div className="flex h-full items-center justify-center text-lg italic">Өгөөмж Архад</div>}{product.featured && <span className="absolute left-3 top-3 bg-[#F00028] px-3 py-1 text-[9px] font-bold tracking-[.16em] text-white">FEATURED</span>}{sold && <span className="absolute inset-x-0 bottom-0 bg-[#1A1A1A]/65 py-3 text-center text-[10px] tracking-[.18em] text-white">{copy.sold}</span>}</button><div className="pt-4"><p className="mb-2 text-[10px] tracking-[.16em] text-[#5C3C2B]">{categoryOf(product, lang)}</p><button onClick={() => setSelected(product)} className="text-left"><h2 className="text-lg md:text-xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{nameOf(product, lang)}</h2></button><div className="mt-3 flex items-end justify-between"><strong className="text-sm">{price > 0 ? money(price) : "—"}</strong><button disabled={sold || price <= 0} onClick={() => add(product)} className="h-9 w-9 border border-[#F1EBDD] hover:bg-[#1A1A1A] hover:text-white disabled:opacity-30">+</button></div></div></article></ScrollReveal>;
-        })}</div>}
-        <div className="mt-20 border-t border-[#F1EBDD] pt-6 text-[10px] tracking-[.14em] text-[#5C3C2B]">{source === "google-sheets" ? copy.sheet : copy.prototype}</div>
-      </section>
-    </>}
-
-    {view === "cart" && <section className="mx-auto max-w-5xl px-5 py-14 md:px-10 md:py-20"><button onClick={() => go("shop")} className="mb-10 text-xs tracking-[.2em] text-[#5C3C2B]">← {copy.continue}</button><div className="mb-10 flex items-end justify-between border-b border-[#F1EBDD] pb-6"><h1 className="text-4xl md:text-5xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.cart}</h1><span>{cartCount}</span></div>{cartProducts.length === 0 ? <div className="py-20 text-center"><p className="mb-8 text-lg text-[#5C3C2B]">{copy.empty}</p><button onClick={() => go("shop")} className="bg-[#F00028] px-8 py-3 text-xs tracking-[.18em] text-white">{copy.continue}</button></div> : <div className="grid gap-10 lg:grid-cols-[1fr_340px]"><div className="divide-y divide-[#F1EBDD] border-y border-[#F1EBDD]">{cartProducts.map((product) => <div key={product.id} className="grid grid-cols-[84px_1fr] gap-5 py-5 md:grid-cols-[110px_1fr_auto] md:items-center"><div className="aspect-square overflow-hidden bg-[#F1EBDD]">{product.imageUrl && <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />}</div><div><p className="text-[10px] text-[#5C3C2B]">{product.sku}</p><h2 className="mt-1 text-lg" style={{ fontFamily: "var(--app-font-serif), serif" }}>{nameOf(product, lang)}</h2><p className="mt-2 text-sm">{money(priceOf(product))}</p></div><div className="col-start-2 flex items-center gap-3 md:col-start-auto"><button onClick={() => changeQty(product, -1)} className="h-9 w-9 border border-[#F1EBDD]">−</button><span className="min-w-8 text-center">{cart[product.id]}</span><button onClick={() => changeQty(product, 1)} className="h-9 w-9 border border-[#F1EBDD]">+</button></div></div>)}</div><aside className="h-fit border border-[#F1EBDD] bg-[#F1EBDD] p-7"><div className="flex justify-between border-b border-[#F1EBDD] pb-5"><span>{copy.subtotal}</span><strong>{money(subtotal)}</strong></div><p className="py-5 text-xs leading-6 text-[#5C3C2B]">{copy.deliveryNote}</p><button onClick={() => go("checkout")} className="w-full bg-[#F00028] px-6 py-4 text-xs font-semibold tracking-[.18em] text-white">{copy.checkout}</button></aside></div>}</section>}
-
-    {view === "checkout" && <section className="mx-auto max-w-6xl px-5 py-14 md:px-10 md:py-20"><button onClick={() => go("cart")} className="mb-10 text-xs tracking-[.2em] text-[#5C3C2B]">← {copy.cart}</button><h1 className="mb-12 text-4xl md:text-5xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.checkoutTitle}</h1><form onSubmit={submitOrder} className="grid gap-10 lg:grid-cols-[1fr_360px]"><div className="space-y-8"><fieldset className="border border-[#F1EBDD] bg-[#FFFFFF] p-6 md:p-8"><legend className="px-3 text-[11px] font-bold tracking-[.18em] text-[#F00028]">{lang === "mn" ? "ХҮЛЭЭН АВАГЧ" : "RECIPIENT"}</legend><div className="grid gap-5 md:grid-cols-2">{field("firstName", copy.firstName)}{field("lastName", copy.lastName)}{field("phone", copy.phone)}{field("email", copy.email)}{field("cityDistrict", copy.district, true)}{field("deliveryAddress", copy.address, true)}<label className="md:col-span-2"><span className="mb-2 block text-[10px] tracking-[.14em] text-[#5C3C2B]">{copy.note}</span><textarea value={customer.notes} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setCustomer((current) => ({ ...current, notes: event.target.value }))} className="min-h-28 w-full border border-[#F1EBDD] bg-[#FFFFFF] px-4 py-3 text-sm outline-none" /></label></div></fieldset><fieldset className="border border-[#F1EBDD] p-6"><legend className="px-3 text-[11px] font-bold tracking-[.18em] text-[#F00028]">{copy.delivery}</legend><div className="grid gap-3 md:grid-cols-2">{[["DELIVERY", copy.deliveryOption], ["PICKUP", copy.pickup]].map(([value, label]) => <label key={value} className={`cursor-pointer border p-4 text-sm ${customer.deliveryMethod === value ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}><input type="radio" checked={customer.deliveryMethod === value} onChange={() => setCustomer((current) => ({ ...current, deliveryMethod: value as Customer["deliveryMethod"] }))} className="mr-3" />{label}</label>)}</div></fieldset><fieldset className="border border-[#F1EBDD] p-6"><legend className="px-3 text-[11px] font-bold tracking-[.18em] text-[#F00028]">{copy.payment}</legend><div className="grid gap-3 md:grid-cols-2">{[["BANK_TRANSFER", copy.bank], ["QPAY", copy.qpay]].map(([value, label]) => <label key={value} className={`cursor-pointer border p-4 text-sm ${customer.paymentMethod === value ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}><input type="radio" checked={customer.paymentMethod === value} onChange={() => setCustomer((current) => ({ ...current, paymentMethod: value as Customer["paymentMethod"] }))} className="mr-3" />{label}</label>)}</div></fieldset></div><aside className="h-fit border border-[#F1EBDD] bg-[#F1EBDD] p-7 lg:sticky lg:top-32"><h2 className="mb-5 text-xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.cart}</h2><div className="space-y-3 border-y border-[#F1EBDD] py-5">{cartProducts.map((product) => <div key={product.id} className="flex justify-between gap-4 text-sm"><span>{cart[product.id]} × {nameOf(product, lang)}</span><span>{money(priceOf(product) * cart[product.id])}</span></div>)}</div><div className="flex justify-between py-6"><span>{copy.subtotal}</span><strong>{money(subtotal)}</strong></div>{formError && <p className="mb-5 text-sm leading-6 text-[#F00028]">{formError}</p>}<button type="submit" disabled={submitting} className="w-full bg-[#F00028] px-6 py-4 text-xs font-semibold tracking-[.18em] text-white disabled:opacity-50">{submitting ? copy.sending : copy.place}</button><p className="mt-4 text-[11px] leading-5 text-[#5C3C2B]">{lang === "mn" ? "Картын дугаар, CVV, банкны нууц үг энэ сайтад хадгалагдахгүй." : "Card numbers, CVV and banking passwords are never stored by this site."}</p></aside></form></section>}
-
-    {view === "success" && <section className="mx-auto flex min-h-[65vh] max-w-3xl items-center px-5 py-16 md:px-10"><div className="w-full border border-[#F1EBDD] bg-[#F1EBDD] p-8 text-center md:p-14"><div className="mx-auto mb-7 flex h-14 w-14 items-center justify-center rounded-full bg-[#C98A3D] text-2xl text-white">✓</div><h1 className="text-3xl md:text-4xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.success}</h1><p className="mx-auto mt-5 max-w-xl text-sm leading-7 text-[#5C3C2B]">{copy.successBody}</p><div className="mx-auto my-8 max-w-sm border-y border-[#F1EBDD] py-5"><p className="text-[10px] tracking-[.16em] text-[#5C3C2B]">{copy.orderNo}</p><strong className="mt-2 block text-xl">{orderNumber}</strong></div><button onClick={() => go("shop")} className="bg-[#F00028] px-8 py-4 text-xs font-semibold tracking-[.18em] text-white">{copy.back}</button></div></section>}
-
-    {selected && <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1A1A1A]/55 md:items-center md:p-8" onMouseDown={() => setSelected(null)}><div className="max-h-[92vh] w-full max-w-4xl overflow-auto bg-[#FFFFFF] shadow-2xl" onMouseDown={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}><div className="grid md:grid-cols-2"><div className="aspect-[4/5] bg-[#F1EBDD]">{selected.imageUrl && <img src={selected.imageUrl} alt={nameOf(selected, lang)} className="h-full w-full object-cover" />}</div><div className="relative p-7 md:p-10"><button onClick={() => setSelected(null)} className="absolute right-5 top-5 h-9 w-9 border border-[#F1EBDD]">×</button><p className="mb-4 text-[10px] tracking-[.16em] text-[#F00028]">{categoryOf(selected, lang)}</p><h2 className="pr-10 text-3xl md:text-4xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{nameOf(selected, lang)}</h2><p className="mt-5 text-sm leading-7 text-[#5C3C2B]">{descOf(selected, lang)}</p><div className="mt-8 border-y border-[#F1EBDD] py-5 text-sm"><div className="flex justify-between"><span>SKU</span><span>{selected.sku || "—"}</span></div><div className="mt-3 flex justify-between"><span>{copy.stock}</span><span>{selected.stockQuantity} {selected.unit}</span></div>{selected.weight && <div className="mt-3 flex justify-between"><span>{lang === "mn" ? "Жин" : "Weight"}</span><span>{selected.weight}</span></div>}</div><div className="mt-7 flex items-center justify-between"><strong className="text-xl">{priceOf(selected) > 0 ? money(priceOf(selected)) : "—"}</strong><button disabled={selected.stockQuantity <= 0 || priceOf(selected) <= 0} onClick={() => { add(selected); setSelected(null); }} className="bg-[#F00028] px-6 py-3 text-xs font-semibold tracking-[.16em] text-white disabled:opacity-30">{copy.add}</button></div></div></div></div></div>}
-
-    <footer className="border-t border-[#F1EBDD] bg-[#F00028] px-5 py-10 text-center text-[11px] tracking-[.14em] text-white/55">© {new Date().getFullYear()} Өгөөмж Архад ХХК · ONLINE STORE</footer>
-  </main>;
-}
+    delivery: "Del

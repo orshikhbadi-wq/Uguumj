@@ -1,7 +1,6 @@
 import {
   appendStoreOrder,
   googleSheetsConfigured,
-  PROTOTYPE_PRODUCTS,
   StoreCheckoutError,
   type StoreCheckoutInput,
 } from "../../../../lib/googleSheetsStore";
@@ -15,25 +14,6 @@ function positiveInt(value: unknown) {
   return Number.isInteger(number) && number > 0 && number <= 10000 ? number : 0;
 }
 
-function prototypeOrder(input: StoreCheckoutInput) {
-  const catalog = new Map(PROTOTYPE_PRODUCTS.map((product) => [product.id, product]));
-  const quantities = new Map<string, number>();
-  for (const item of input.items) quantities.set(item.productId, (quantities.get(item.productId) ?? 0) + item.quantity);
-
-  let subtotal = 0;
-  for (const [productId, quantity] of quantities) {
-    const product = catalog.get(productId);
-    if (!product) throw new StoreCheckoutError("Prototype product is unavailable", "PRODUCT_NOT_FOUND");
-    if (quantity > product.stockQuantity) throw new StoreCheckoutError("Requested quantity exceeds current stock", "OUT_OF_STOCK");
-    const price = product.salePrice && product.salePrice > 0 ? product.salePrice : product.price;
-    subtotal += price * quantity;
-  }
-  const deliveryFee = Math.max(0, Number(input.deliveryFee || 0));
-  const discount = Math.min(subtotal + deliveryFee, Math.max(0, Number(input.discount || 0)));
-  const total = subtotal + deliveryFee - discount;
-  return { orderNumber: `UG-DEMO-${Date.now().toString().slice(-8)}`, subtotal, total, storage: "prototype" as const };
-}
-
 export async function POST(request: Request) {
   let body: StoreCheckoutInput;
   try {
@@ -41,6 +21,8 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
+
+  if (!body || typeof body !== "object") return Response.json({ error: "Invalid checkout" }, { status: 400 });
 
   const customer = {
     firstName: clean(body.customer?.firstName, 80),
@@ -51,8 +33,8 @@ export async function POST(request: Request) {
     deliveryAddress: clean(body.customer?.deliveryAddress, 300),
   };
   const items = Array.isArray(body.items) ? body.items.slice(0, 100).map((item) => ({
-    productId: clean(item.productId, 80),
-    quantity: positiveInt(item.quantity),
+    productId: clean(item?.productId, 80),
+    quantity: positiveInt(item?.quantity),
   })).filter((item) => item.productId && item.quantity > 0) : [];
 
   if (!customer.firstName || !customer.phone || !customer.cityDistrict || !customer.deliveryAddress || items.length === 0) {
@@ -72,16 +54,16 @@ export async function POST(request: Request) {
   };
 
   try {
-    if (!googleSheetsConfigured()) return Response.json(prototypeOrder(safeInput), { status: 201 });
+    if (!googleSheetsConfigured()) return Response.json({ error: "Order storage is temporarily unavailable" }, { status: 503 });
     const result = await appendStoreOrder(safeInput);
     if (!result) throw new Error("Google Sheets configuration disappeared during checkout");
     return Response.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof StoreCheckoutError) {
       const status = error.code === "OUT_OF_STOCK" ? 409 : 400;
-      return Response.json({ error: error.message, code: error.code }, { status });
+      return Response.json({ error: error.message, code: error.code, availableStock: error.availableStock }, { status });
     }
-    console.error("store checkout", error);
+    void error;
     return Response.json({ error: "Order storage is temporarily unavailable" }, { status: 503 });
   }
 }

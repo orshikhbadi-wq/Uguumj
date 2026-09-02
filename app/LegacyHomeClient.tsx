@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 
 const BOOTSTRAP_SRC = "/legacy/bootstrap.js";
-const LEGACY_REACT_SRC = "/legacy/assets/index-Bx44nbsr.js";
+const LEGACY_REACT_SRC = "/legacy/assets/index-Bx44nbsr.js?v=33112e3d6ac8";
 
 type LegacyLoaderWindow = Window & {
   __uguumjLegacyBootstrapPromise?: Promise<void>;
