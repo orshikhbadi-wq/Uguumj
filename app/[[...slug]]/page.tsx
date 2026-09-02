@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import AdminClient from "../admin/AdminClient";
 import RebaClient from "../reba/RebaClient";
 import WholesaleStoreClient from "../store/WholesaleStoreClient";
+import AccountClient from "../account/AccountClient";
 import UguumjArkhadPrototype from "../UguumjArkhadPrototype";
 import LegacyHomeClient from "../LegacyHomeClient";
 
@@ -18,6 +19,8 @@ export default async function SiteRoute({ params, searchParams }: { params: Prom
     redirect(view === "cart" || view === "checkout" ? `/store?view=${view}` : "/store");
   }
   if (route.slug?.join("/") === "store") return <WholesaleStoreClient initialCatalogue={readCatalogueSnapshot()} />;
+  if (route.slug?.join("/") === "account") return <AccountClient />;
+  if (route.slug?.join("/") === "account/orders") return <AccountClient ordersOnly />;
 
   return <LegacyHomeClient />;
 }
