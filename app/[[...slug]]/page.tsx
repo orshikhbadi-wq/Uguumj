@@ -1,3 +1,4 @@
+import { readCatalogueSnapshot } from "../../lib/catalogueSnapshot";
 import { redirect } from "next/navigation";
 /* eslint-disable @next/next/no-sync-scripts */
 import AdminClient from "../admin/AdminClient";
@@ -16,7 +17,7 @@ export default async function SiteRoute({ params, searchParams }: { params: Prom
     const view = query.view;
     redirect(view === "cart" || view === "checkout" ? `/store?view=${view}` : "/store");
   }
-  if (route.slug?.join("/") === "store") return <WholesaleStoreClient />;
+  if (route.slug?.join("/") === "store") return <WholesaleStoreClient initialCatalogue={readCatalogueSnapshot()} />;
 
   return <LegacyHomeClient />;
 }
