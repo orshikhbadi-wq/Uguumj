@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ScrollReveal from "../components/ScrollReveal";
 
 type Lang = "mn" | "en";
 
@@ -261,7 +262,7 @@ export default function ProductsClient() {
         .filter-chip:hover,.filter-chip.active{background:#2e261f;color:#fff;border-color:#2e261f}
         .product-search{width:min(300px,100%);display:flex;align-items:center;gap:9px;border:1px solid #ddd5c9;border-radius:999px;padding:10px 15px;background:rgba(255,255,255,.25)}
         .product-search span{font-size:18px;color:#6e645b}.product-search input{width:100%;border:0;outline:0;background:transparent;color:#312a24;font-size:11px}.product-search input::placeholder{color:#aaa096}
-        .products-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:28px}
+        .products-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:28px}.product-card-reveal{height:100%}
         .product-card{border:1px solid #dfd7cb;background:rgba(255,255,255,.34);border-radius:12px;overflow:hidden;transition:transform .28s,box-shadow .28s}
         .product-card:hover{transform:translateY(-4px);box-shadow:0 18px 46px rgba(65,51,39,.09)}
         .product-image-wrap{position:relative;aspect-ratio:1.62/1;overflow:hidden;background:#eee7dc}
@@ -281,26 +282,32 @@ export default function ProductsClient() {
       <Header lang={lang} onLanguage={setLang} />
       <div className="products-shell">
         <section className="products-hero">
-          <div>
-            <p className="products-eyebrow">{t.eyebrow}</p>
-            <h1 className="products-title">{t.title}<em>{t.accent1}<br />{t.accent2}</em></h1>
-          </div>
-          <p className="products-intro">{t.intro}</p>
+          <ScrollReveal from="left" duration={760}>
+            <div>
+              <p className="products-eyebrow">{t.eyebrow}</p>
+              <h1 className="products-title">{t.title}<em>{t.accent1}<br />{t.accent2}</em></h1>
+            </div>
+          </ScrollReveal>
+          <ScrollReveal from="right" delay={120} duration={760}>
+            <p className="products-intro">{t.intro}</p>
+          </ScrollReveal>
         </section>
 
         <section id="products">
-          <div className="products-controls">
-            <div className="filter-chips">
-              <button className={selectedCategory === "all" ? "filter-chip active" : "filter-chip"} type="button" onClick={() => setSelectedCategory("all")}>{t.all}</button>
-              {categories.map((category) => (
-                <button className={selectedCategory === category.key ? "filter-chip active" : "filter-chip"} type="button" onClick={() => setSelectedCategory(category.key)} key={category.key}>{category.label.toUpperCase()}</button>
-              ))}
+          <ScrollReveal from="bottom" delay={80}>
+            <div className="products-controls">
+              <div className="filter-chips">
+                <button className={selectedCategory === "all" ? "filter-chip active" : "filter-chip"} type="button" onClick={() => setSelectedCategory("all")}>{t.all}</button>
+                {categories.map((category) => (
+                  <button className={selectedCategory === category.key ? "filter-chip active" : "filter-chip"} type="button" onClick={() => setSelectedCategory(category.key)} key={category.key}>{category.label.toUpperCase()}</button>
+                ))}
+              </div>
+              <label className="product-search">
+                <span aria-hidden="true">⌕</span>
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} />
+              </label>
             </div>
-            <label className="product-search">
-              <span aria-hidden="true">⌕</span>
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.search} />
-            </label>
-          </div>
+          </ScrollReveal>
 
           {visibleProducts.length ? (
             <div className="products-grid">
@@ -310,33 +317,43 @@ export default function ProductsClient() {
                 const category = product.category || apiCategories.find((item) => String(item.id) === String(product.category_id))?.[lang === "mn" ? "name_mn" : "name_en"] || "";
                 const href = `/products/${product.slug || product.id || index}`;
                 return (
-                  <article className="product-card" key={String(product.id || product.slug || index)}>
-                    <a href={href} className="product-image-wrap">
-                      {product.image_url ? <img src={imageUrl(product.image_url)} alt={product.image_alt || title} loading={index < 3 ? "eager" : "lazy"} /> : null}
-                      {(product.featured === true || product.featured === "true") && <span className="featured-badge">{t.featured}</span>}
-                    </a>
-                    <div className="product-card-body">
-                      {category && <p className="product-category">{category}</p>}
-                      <h2><a href={href}>{title}</a></h2>
-                      <p className="product-description">{description}</p>
-                      <a className="product-link" href={href}>{t.readMore}<span>→</span></a>
-                    </div>
-                  </article>
+                  <ScrollReveal
+                    key={String(product.id || product.slug || index)}
+                    from={index % 3 === 0 ? "left" : index % 3 === 2 ? "right" : "bottom"}
+                    delay={(index % 3) * 90}
+                    duration={700}
+                    className="product-card-reveal"
+                  >
+                    <article className="product-card">
+                      <a href={href} className="product-image-wrap">
+                        {product.image_url ? <img src={imageUrl(product.image_url)} alt={product.image_alt || title} loading={index < 3 ? "eager" : "lazy"} /> : null}
+                        {(product.featured === true || product.featured === "true") && <span className="featured-badge">{t.featured}</span>}
+                      </a>
+                      <div className="product-card-body">
+                        {category && <p className="product-category">{category}</p>}
+                        <h2><a href={href}>{title}</a></h2>
+                        <p className="product-description">{description}</p>
+                        <a className="product-link" href={href}>{t.readMore}<span>→</span></a>
+                      </div>
+                    </article>
+                  </ScrollReveal>
                 );
               })}
             </div>
           ) : <div className="products-empty">{t.empty}</div>}
         </section>
 
-        <aside className="wholesale-panel">
-          <div className="wholesale-icon">♨</div>
-          <div>
-            <p className="product-category">{t.wholesaleEyebrow}</p>
-            <h3>{t.wholesaleTitle}</h3>
-            <p>{t.wholesaleBody}</p>
-          </div>
-          <a className="wholesale-button" href="/wholesale">{t.wholesaleCta}<span>→</span></a>
-        </aside>
+        <ScrollReveal from="bottom" delay={100} duration={760}>
+          <aside className="wholesale-panel">
+            <div className="wholesale-icon">♨</div>
+            <div>
+              <p className="product-category">{t.wholesaleEyebrow}</p>
+              <h3>{t.wholesaleTitle}</h3>
+              <p>{t.wholesaleBody}</p>
+            </div>
+            <a className="wholesale-button" href="/wholesale">{t.wholesaleCta}<span>→</span></a>
+          </aside>
+        </ScrollReveal>
       </div>
     </main>
   );
