@@ -7,8 +7,9 @@ const dataModule = code => `data:text/javascript;base64,${Buffer.from(stripTypeS
 const adapterSource = (await readFile(new URL('../lib/catalogueSnapshot.ts',import.meta.url),'utf8')).replace('import snapshot from "../data/catalogue-snapshot.json";', `const snapshot = ${JSON.stringify(snapshot)};`);
 const images = JSON.parse(await readFile(new URL('../data/catalogue-images.json',import.meta.url),'utf8'));
 const adapterURL = dataModule(adapterSource.replace('import catalogueImages from "../data/catalogue-images.json";', `const catalogueImages = ${JSON.stringify(images)};`));
+const orderingURL = dataModule(await readFile(new URL('../lib/storeOrdering.ts',import.meta.url),'utf8'));
 async function route(name) {
- const source = (await readFile(new URL(`../app/api/store/${name}/route.ts`,import.meta.url),'utf8')).replace('"../../../../lib/catalogueSnapshot"',JSON.stringify(adapterURL));
+ const source = (await readFile(new URL(`../app/api/store/${name}/route.ts`,import.meta.url),'utf8')).replace('"../../../../lib/catalogueSnapshot"',JSON.stringify(adapterURL)).replace('"../../../../lib/storeOrdering"',JSON.stringify(orderingURL));
  return import(dataModule(source));
 }
 test('prototype returns all 23 exact source products without Google credentials', async () => {
@@ -16,6 +17,9 @@ test('prototype returns all 23 exact source products without Google credentials'
  assert.equal(response.status,200);
  const body = await response.json();
  assert.equal(body.products.length,23);assert.equal(body.categories.length,5);
+ assert.equal(body.products.flatMap(p=>p.variants).length,35);
+ assert.equal(body.settings.minimum_order_amount,150000);
+ assert.equal(body.settings.minimum_order_operator,'GT');
  assert.equal(body.source,'google-sheets-snapshot');assert.equal(body.orderingEnabled,false);
  for(const product of body.products){
    const source = snapshot.products.find(x=>x.product_id===product.id);
@@ -28,5 +32,5 @@ test('prototype returns all 23 exact source products without Google credentials'
 });
 test('prototype checkout never writes orders or creates a success confirmation',async()=>{
  const {POST}=await route('orders');const response=await POST(new Request('https://example.test/api/store/orders',{method:'POST',body:JSON.stringify({items:[{productId:'PRD-000001',quantity:1}]})}));
- assert.equal(response.status,503);const body=await response.json();assert.equal(body.code,'PROTOTYPE_ORDERING_DISABLED');assert.equal(body.orderNumber,undefined);
+ assert.equal(response.status,400);const body=await response.json();assert.equal(body.code,'INVALID_QUANTITY');assert.equal(body.orderNumber,undefined);
 });

@@ -19,6 +19,8 @@ snapshot = {
     'commercialDataApproved': False,
     'products': products,
     'categories': categories,
+    'variants': records('01_Product_Variants'),
+    'settings': [row for row in records('08_Settings') if row.get('setting_key') in ['minimum_order_amount','minimum_order_operator','minimum_order_scope']],
 }
 destination = pathlib.Path(__file__).resolve().parent.parent / 'data/catalogue-snapshot.json'
 destination.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, default=str)+'\n')

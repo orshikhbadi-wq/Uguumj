@@ -1,32 +1,31 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { variantPrice, unitLabel, quantityLabel, type ProductVariant } from "../../lib/storeOrdering";
 import type { StoreProduct } from "../../lib/googleSheetsStore";
 
 export default function ProductDetail({ product, lang, inCart, onClose, onAdd }: {
-  product: StoreProduct; lang: "mn" | "en"; inCart: number;
-  onClose: () => void; onAdd: (quantity: number) => void;
+  product: StoreProduct; lang: "mn" | "en"; inCart: Record<string, number>;
+  onClose: () => void; onAdd: (variant: ProductVariant, quantity: number) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [quantity, setQuantity] = useState("1");
-  const [variant, setVariant] = useState(0);
+  const [variantId, setVariantId] = useState(product.variants?.length === 1 ? product.variants[0].variant_id : "");
   const [imageIndex, setImageIndex] = useState(0);
   const mn = lang === "mn";
   const localized = (a?: string, b?: string) => (mn ? a || b : b || a)?.trim() || "";
   const name = localized(product.nameMn, product.nameEn);
   const images = Array.from(new Set([product.imageUrl, ...(product.imageUrls || [])].filter(Boolean)));
   const split = (value?: string) => (value || "").split(/[;\n]+/).map(x => x.trim()).filter(Boolean);
-  const codes = split(product.sku);
-  const weights = split(product.weight);
-  const hasVariants = codes.length > 1 || weights.length > 1;
-  const paired = codes.length === weights.length;
-  // Unequal source counts cannot establish a SKU-to-weight mapping: preserve every value.
-  const options = paired ? weights : codes.length > 1 ? codes : weights;
-  const selectedCode = hasVariants && codes.length > 1 ? codes[variant] : product.sku;
-  const selectedWeight = hasVariants && paired ? weights[variant] : product.weight;
-  const price = product.salePrice && product.salePrice > 0 ? product.salePrice : (product.price ?? 0);
+  const variants = (product.variants || []).filter(v=>v.status==='ACTIVE');
+  const variant = variants.find(v=>v.variant_id===variantId);
+  const hasVariants = variants.length > 1;
+  const selectedCode = variant?.sku || "—";
+  const selectedWeight = variant ? `${variant.weight} ${variant.weight_unit}`.trim() : "—";
+  const price = variantPrice(variant);
   const money = (value: number) => `${new Intl.NumberFormat("en-US").format(value)}₮`;
-  const orderable = (product.price ?? 0) > 0 && (product.stockQuantity ?? 0) > 0;
-  const maximum = orderable ? Math.max(0, Math.floor(product.stockQuantity ?? 0) - inCart) : 0;
+  const cartQuantity = variant ? inCart[variant.variant_id] || 0 : 0;
+  const orderable = !!variant && price > 0 && (variant.stock_quantity ?? 0) > 0;
+  const maximum = orderable ? Math.max(0, Math.floor(variant!.stock_quantity ?? 0) - cartQuantity) : 0;
   const amount = Number(quantity);
   const valid = /^\d+$/.test(quantity) && Number.isSafeInteger(amount) && amount >= 1 && amount <= maximum;
   useEffect(() => {
@@ -65,17 +64,20 @@ export default function ProductDetail({ product, lang, inCart, onClose, onAdd }:
       <div className="detail-content">
         <p className="detail-category">{localized(product.categoryNameMn, product.categoryNameEn)}</p>
         <h2 id="store-product-name" className="detail-name">{name}</h2>
-        <p className="detail-price">{(product.price ?? 0) > 0 ? money(price) : (mn ? "Үнэ удахгүй" : "Price coming soon")}{product.salePrice && product.salePrice > 0 && product.salePrice < (product.price ?? 0) ? <del>{money(product.price ?? 0)}</del> : null}</p>
-        <p className="detail-stock">{product.stockQuantity == null ? (mn ? "Нөөцийн мэдээлэл удахгүй" : "Stock information coming soon") : product.stockQuantity > 0 ? (mn ? "Нөөцтэй" : "In stock") : (mn ? "Дууссан" : "Out of stock")}</p>
-        {hasVariants && <fieldset className="detail-variants"><legend>{mn ? "Савлагаа" : "Packaging"}</legend>{options.map((option,index) => <label key={index}><input type="radio" name={`variant-${product.id}`} checked={variant===index} onChange={()=>setVariant(index)} /><span>{option.replace(/^Савлагаа:\s*/,"")}{paired && <span className="block mt-1 opacity-60">{codes[index]}</span>}</span></label>)}<p className="detail-variant-note">{mn ? "Савлагааны сонголт нь мэдээллийн зориулалттай. Савлагаа тус бүрийн үнэ, нөөц баталгаажаагүй." : "Packaging selection is informational. Prices and stock per variant are not yet confirmed."}</p></fieldset>}
-        <label htmlFor="detail-quantity" className="detail-quantity-label">{mn ? "Тоо ширхэг" : "Quantity"}</label>
+        {hasVariants && <fieldset className="detail-variants"><legend>{mn ? "Хэмжээ / Савлагаа" : "Size / Packaging"}</legend>{variants.map(option => <label key={option.variant_id}><input type="radio" name={`variant-${product.id}`} checked={variantId===option.variant_id} onChange={()=>{setVariantId(option.variant_id);setQuantity("1");}} /><span>{option.variant_name_mn}<span className="block mt-1 opacity-60">{option.weight} {option.weight_unit}</span></span></label>)}</fieldset>}
+        {!variant && <p className="detail-stock">{mn ? "Хэмжээ / савлагаагаа сонгоно уу." : "Choose a size / packaging."}</p>}
+        {variant && <p className="detail-stock">{variant.variant_name_mn}</p>}
+        <p className="detail-price">{price > 0 ? money(price) : (mn ? "Үнэ удахгүй" : "Price coming soon")}{variant && (variant.sale_price??0)>0 && (variant.sale_price??0)<(variant.price??0) ? <del>{money(variant.price!)}</del> : null}</p>
+        <p className="detail-stock">{variant?.stock_quantity == null ? (mn ? "Нөөцийн мэдээлэл удахгүй" : "Stock information coming soon") : `${variant.stock_quantity} ${unitLabel(variant)} ${mn ? "нөөцтэй" : "available"}`}</p>
+        {variant?.order_unit_type==='PACKAGE' && (variant.units_per_order_unit??0)>0 && <p className="detail-stock">1 {unitLabel(variant)} = {variant.units_per_order_unit} ширхэг<br/>{Number.isSafeInteger(amount)&&amount>0 ? `${amount} ${unitLabel(variant)} = ${amount*variant.units_per_order_unit!} ширхэг` : null}</p>}
+        <label htmlFor="detail-quantity" className="detail-quantity-label">{mn ? quantityLabel(variant) : variant?.order_unit_type==='PACKAGE' ? "Package quantity" : "Quantity"}</label>
         <div className="detail-quantity">
           <button type="button" aria-label={mn ? "Тоо ширхэг бууруулах" : "Decrease quantity"} disabled={maximum < 1 || amount <= 1} onClick={() => change(-1)}>−</button>
           <input id="detail-quantity" type="number" inputMode="numeric" min={1} max={Math.max(1, maximum)} step={1} value={quantity} disabled={maximum < 1} aria-invalid={!valid && maximum > 0} onChange={event => { if (/^\d*$/.test(event.target.value)) setQuantity(event.target.value); }} onBlur={() => { if (!valid) setQuantity(String(Math.max(1, Math.min(maximum, Number.isFinite(amount) ? Math.floor(amount) : 1)))); }} />
           <button type="button" aria-label={mn ? "Тоо ширхэг нэмэх" : "Increase quantity"} disabled={maximum < 1 || amount >= maximum} onClick={() => change(1)}>+</button>
         </div>
-        {inCart > 0 && <p className="detail-stock">{mn ? `Сагсанд: ${inCart} ширхэг` : `In cart: ${inCart}`}</p>}
-        <button type="button" disabled={!valid || price <= 0} onClick={() => { if (valid) onAdd(amount); }} className="detail-add">{mn ? "САГСАНД НЭМЭХ" : "ADD TO CART"}</button>
+        {cartQuantity > 0 && <p className="detail-stock">{mn ? `Сагсанд: ${cartQuantity} ${variant ? unitLabel(variant) : ""}` : `In cart: ${cartQuantity}`}</p>}
+        <button type="button" disabled={!valid || price <= 0} onClick={() => { if (valid && variant) onAdd(variant, amount); }} className="detail-add">{mn ? "САГСАНД НЭМЭХ" : "ADD TO CART"}</button>
         <div className="detail-accordions">
           <details open><summary>{mn ? "БҮТЭЭГДЭХҮҮНИЙ МЭДЭЭЛЭЛ" : "PRODUCT INFORMATION"}</summary><div className="detail-accordion-body"><dl>
             <div><dt>{mn ? "Бүтээгдэхүүний код:" : "Product code:"}</dt><dd>{lines(selectedCode)}</dd></div>

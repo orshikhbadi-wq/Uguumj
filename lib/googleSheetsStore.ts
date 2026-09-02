@@ -1,3 +1,4 @@
+import type { ProductVariant } from "./storeOrdering";
 import { env } from "cloudflare:workers";
 
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
@@ -9,6 +10,7 @@ const runtime = env as unknown as {
 };
 
 export type StoreProduct = {
+  variants?: ProductVariant[];
   id: string;
   sku: string;
   nameMn: string;

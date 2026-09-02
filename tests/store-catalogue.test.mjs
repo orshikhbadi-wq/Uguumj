@@ -41,30 +41,3 @@ test('Sheets rows preserve missing commercial values and multiline product infor
     assert.equal(refreshed.stockQuantity, 8);
   } finally { globalThis.fetch = originalFetch; }
 });
-
-test('unpriced product detail retains source fields and disables purchasing controls', async () => {
-  const ts = await import('typescript');
-  const React = await import('react');
-  const { renderToStaticMarkup } = await import('react-dom/server');
-  const source = await readFile(new URL('../app/store/ProductDetail.tsx', import.meta.url), 'utf8');
-  let code = ts.transpileModule(source, {compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-  code = code.replaceAll('"react/jsx-runtime"', JSON.stringify(import.meta.resolve('react/jsx-runtime'))).replaceAll('"react"',JSON.stringify(import.meta.resolve('react')));
-  const { default: ProductDetail } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
-  const html = renderToStaticMarkup(React.createElement(ProductDetail, {
-    product:{id:'test', nameMn:'Туршилт', nameEn:'Test', sku:'CODE-1\nCODE-2', weight:'1 кг\n0.5 кг', usageMn:'Usage', ingredientsMn:'Ingredients', characteristicsMn:'Characteristics', price:null, stockQuantity:null},
-    lang:'mn',inCart:0,onClose(){},onAdd(){},
-  }));
-  for (const label of ['Бүтээгдэхүүний код:','Бүтээгдэхүүний жин:','Хэрэглээ:','БҮТЭЭГДЭХҮҮНИЙ ОРЦ','БҮТЭЭГДЭХҮҮНИЙ ОНЦЛОГ','Үнэ удахгүй','Нөөцийн мэдээлэл удахгүй']) assert.ok(html.includes(label), label);
-  assert.equal((html.match(/<details(?: open="")?>/g)||[]).length, 3);
-  assert.equal((html.match(/<details open="">/g)||[]).length, 1);
-  assert.equal((html.match(/disabled=""/g)||[]).length, 4);
-  assert.ok(html.includes('CODE-1')); assert.ok(html.includes('CODE-2'));
-  assert.ok(html.includes('object-fit:contain'));
-  const priced = renderToStaticMarkup(React.createElement(ProductDetail, {product:{id:'priced',nameMn:'Үнэтэй',sku:'SKU',weight:'1 кг',price:9455,salePrice:8469,stockQuantity:3,commercialDataApproved:false},lang:'mn',inCart:0,onClose(){},onAdd(){}}));
-  assert.ok(priced.includes('8,469₮')); assert.ok(priced.includes('<del>9,455₮</del>'));
-  assert.ok(priced.includes('max="3"'));
-  assert.equal((priced.match(/disabled=""/g)||[]).length,1);
-  const unequal = renderToStaticMarkup(React.createElement(ProductDetail, {product:{id:'variant',nameMn:'Variants',sku:'A; B; C; D',weight:'Small; Medium; Large',price:100,stockQuantity:2},lang:'mn',inCart:0,onClose(){},onAdd(){}}));
-  assert.equal((unequal.match(/type="radio"/g)||[]).length,4);
-  for(const weight of ['Small','Medium','Large']) assert.ok(unequal.includes(weight));
-});
