@@ -6,8 +6,14 @@ export type ProductVariant = {
 };
 export type OrderSettings = { minimum_order_amount:number; minimum_order_operator:string; minimum_order_scope:string };
 export type CartLine = Pick<ProductVariant,'product_id'|'variant_id'|'sku'|'variant_name_mn'|'order_unit_type'|'order_unit_label_mn'|'package_type_mn'|'units_per_order_unit'> & {quantity:number;unit_price:number};
-export const variantPrice=(v?:ProductVariant)=>v && (v.price??0)>0 ? ((v.sale_price??0)>0 ? v.sale_price! : v.price!) : 0;
-export const unitLabel=(v:ProductVariant)=>v.order_unit_label_mn || (v.order_unit_type==='UNIT'?'ширхэг':v.package_type_mn.toLowerCase() || 'савлагаа');
+export const variantPrice=(v?:ProductVariant)=>v && (v.price??0)>0 ? ((v.sale_price??0)>0 && (v.sale_price??0)<(v.price??0) ? v.sale_price! : v.price!) : 0;
+export const weightLabel=(v?:Pick<ProductVariant,'weight'|'weight_unit'>)=>{
+ if(!v) return '';
+ const weight=(v.weight||'').trim();
+ const unit=(v.weight_unit||'').trim();
+ return weight && /кг|kg/i.test(weight) ? weight : [weight,unit].filter(Boolean).join(' ');
+};
+export const unitLabel=(v:ProductVariant)=>v.order_unit_type==='UNIT' ? 'ширхэг' : (v.package_type_mn || v.order_unit_label_mn || 'Савлагаа').toLowerCase();
 export function quantityLabel(v?:ProductVariant){
  if(!v || v.order_unit_type==='UNIT')return 'Тоо ширхэг';
  return ({'Савлагаа':'Савлагааны тоо','Уут':'Уутны тоо','Хайрцаг':'Хайрцгийн тоо'} as Record<string,string>)[v.package_type_mn] || `${v.package_type_mn || 'Савлагаа'} — тоо`;

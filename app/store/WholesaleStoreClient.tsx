@@ -1,233 +1,32 @@
-"use client";
-
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
-import { variantPrice, makeCartLine, minimumOrder, unitLabel, type ProductVariant, type CartLine, type OrderSettings } from "../../lib/storeOrdering";
-import ProductDetail from "./ProductDetail";
-import type { StoreProduct } from "../../lib/googleSheetsStore";
-import StoreHeader from "./StoreHeader";
-import ScrollReveal from "../components/ScrollReveal";
-
-type Lang = "mn" | "en";
-type View = "shop" | "cart" | "checkout" | "success";
-type Product = StoreProduct;
-type Customer = {
-  firstName: string; lastName: string; phone: string; email: string; cityDistrict: string;
-  deliveryAddress: string; notes: string; deliveryMethod: "DELIVERY" | "PICKUP";
-  paymentMethod: "BANK_TRANSFER" | "QPAY";
-};
-
-const CART_KEY = "uguumj-online-store-cart-variants-v2";
-const EMPTY_CUSTOMER: Customer = {
-  firstName: "", lastName: "", phone: "", email: "", cityDistrict: "", deliveryAddress: "", notes: "",
-  deliveryMethod: "DELIVERY", paymentMethod: "BANK_TRANSFER",
-};
-const money = (value: number) => `${new Intl.NumberFormat("en-US").format(value)}‚ÇÆ`;
-const priceOf = (product: Product) => Math.min(...(product.variants||[]).map(variantPrice).filter(x=>x>0), Infinity);
-const nameOf = (product: Product, lang: Lang) => (lang === "mn" ? product.nameMn : product.nameEn) || product.nameMn || product.nameEn || product.sku;
-const descOf = (product: Product, lang: Lang) => (lang === "mn" ? product.descriptionMn : product.descriptionEn) || product.descriptionMn || product.descriptionEn;
-const categoryOf = (product: Product, lang: Lang) => (lang === "mn" ? product.categoryNameMn : product.categoryNameEn) || product.categoryNameMn || product.categoryNameEn || product.categoryId;
-
-export default function WholesaleStoreClient({ initialCatalogue }: { initialCatalogue?: { settings: OrderSettings; products: Product[]; categories: Array<{ id: string; nameMn: string; nameEn: string }> } }) {
-  const [lang, setLang] = useState<Lang>("mn");
-  const [view, setView] = useState<View>("shop");
-  const [apiCategories, setApiCategories] = useState<Array<{ id: string; nameMn: string; nameEn: string }>>(initialCatalogue?.categories || []);
-  const [settings, setSettings] = useState<OrderSettings|null>(initialCatalogue?.settings || null);
-  const [revision, setRevision] = useState(0);
-  const [products, setProducts] = useState<Product[]>(initialCatalogue?.products || []);
-
-  const [loading, setLoading] = useState(!initialCatalogue);
-  const [loadError, setLoadError] = useState("");
-  const [category, setCategory] = useState("ALL");
-  const [query, setQuery] = useState("");
-  const [cartLoaded, setCartLoaded] = useState(false);
-  const [cart, setCart] = useState<Record<string, CartLine>>({});
-  const [selected, setSelected] = useState<Product | null>(null);
-  const [customer, setCustomer] = useState<Customer>(EMPTY_CUSTOMER);
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState("");
-  const [orderNumber, setOrderNumber] = useState("");
-  const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    try {
-      const savedLang = localStorage.getItem("uguumj-lang");
-      if (savedLang === "en") setLang("en");
-      const savedCart = localStorage.getItem(CART_KEY);
-      if (savedCart) {
-        const value = JSON.parse(savedCart);
-        if (value && typeof value === "object" && !Array.isArray(value)) setCart(Object.fromEntries(Object.entries(value).filter(([,line]) => line && typeof line === 'object' && typeof (line as CartLine).variant_id==='string' && Number.isSafeInteger((line as CartLine).quantity) && (line as CartLine).quantity>0)) as Record<string,CartLine>);
-      }
-      const requested = new URLSearchParams(window.location.search).get("view");
-      if (requested === "cart" || requested === "checkout") setView(requested);
-    } catch { /* local storage is optional */ }
-    setCartLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!cartLoaded) return;
-    try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* optional */ }
-  }, [cart, cartLoaded]);
-
-  useEffect(() => {
-    const refresh = () => setRevision((value) => value + 1);
-    const timer = window.setInterval(refresh, 60000);
-    window.addEventListener("focus", refresh);
-    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    fetch("/api/store/products", { cache: "no-store" })
-      .then(async (response) => {
-        const payload = await response.json() as { settings?: OrderSettings; products?: Product[]; categories?: Array<{ id: string; nameMn: string; nameEn: string }>; source?: string; error?: string };
-        if (!response.ok) throw new Error(payload.error || "Store data unavailable");
-        return payload;
-      })
-      .then((payload) => {
-        if (!active) return;
-        setProducts(Array.isArray(payload.products) ? payload.products : []);
-        setApiCategories(payload.categories || []);
-        setSettings(payload.settings || null);
-
-        setLoadError("");
-      })
-      .catch(() => {
-        if (!active) return;
-        setProducts([]);
-        setApiCategories([]);
-        setLoadError(lang === "mn" ? "–î—ç–ª–≥“Ø“Ø—Ä–∏–π–Ω –º—ç–¥—ç—ç–ª–ª–∏–π–≥ –∞—á–∞–∞–ª–∂ —á–∞–¥—Å–∞–Ω–≥“Ø–π." : "Store data could not be loaded.");
-      })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [lang, revision]);
-
-  useEffect(() => {
-    setSelected((current) => current ? products.find((product) => product.id === current.id) || null : null);
-  }, [products]);
-
-  const categories = useMemo(() => apiCategories.map((item) => [item.id, (lang === "mn" ? item.nameMn : item.nameEn) || item.nameMn || item.nameEn]), [apiCategories, lang]);
-
-  const filtered = useMemo(() => {
-    const search = query.trim().toLowerCase();
-    return products.filter((product) => {
-      const categoryMatch = category === "ALL" || product.categoryId === category;
-      const haystack = `${product.nameMn} ${product.nameEn} ${descOf(product, lang)} ${categoryOf(product, lang)} ${(product.variants||[]).map(v=>v.sku).join(" ")}`.toLowerCase();
-      return categoryMatch && (!search || haystack.includes(search));
-    }).sort((a, b) => Number(b.featured) - Number(a.featured));
-  }, [products, category, query, lang]);
-
-  const cartProducts = useMemo(() => Object.values(cart).map(saved => {
-    const product=products.find(p=>p.id===saved.product_id);
-    const variant=product?.variants?.find(v=>v.variant_id===saved.variant_id);
-    if(!product||!variant)return null;
-    try{return {product,variant,line:makeCartLine(variant,saved.quantity),valid:true};}
-    catch{return {product,variant,line:{...saved,unit_price:variantPrice(variant)},valid:false};}
-  }).filter((x):x is NonNullable<typeof x>=>!!x),[cart,products]);
-  const cartCount = Object.values(cart).reduce((sum,line)=>sum+line.quantity,0);
-  const subtotal = cartProducts.reduce((sum,item)=>sum+item.line.unit_price*item.line.quantity,0);
-  const minimum=minimumOrder(subtotal,settings);
-  const checkoutAllowed=minimum.allowed&&cartProducts.length>0&&cartProducts.length===Object.keys(cart).length&&cartProducts.every(x=>x.valid);
-  const minimumText=settings ? `${money(settings.minimum_order_amount)}-”©”©—Å –¥—ç—ç—à` : "–î–æ–æ–¥ –¥“Ø–Ω–≥–∏–π–Ω –º—ç–¥—ç—ç–ª—ç–ª –∞—á–∞–∞–ª–∂ –±–∞–π–Ω–∞";
-  const minimumNotice=<div className="my-5 space-y-2 text-sm leading-6"><p>–ó–∞—Ö–∏–∞–ª–≥—ã–Ω –¥–æ–æ–¥ –¥“Ø–Ω: <strong>{minimumText}</strong></p>{!minimum.allowed&&<p>–ó–∞—Ö–∏–∞–ª–≥–∞ ”©–≥”©—Ö–∏–π–Ω —Ç—É–ª–¥ –±–∞—Ä–∞–∞–Ω—ã –Ω–∏–π–ª–±—ç—Ä {minimumText} –±–∞–π—Ö —à–∞–∞—Ä–¥–ª–∞–≥–∞—Ç–∞–π.</p>}{(minimum.remaining??0)>0&&<p className="text-[#F00028]">–î–æ–æ–¥ –∑–∞—Ö–∏–∞–ª–≥–∞–¥ —Ö“Ø—Ä—ç—Ö—ç–¥: {money(minimum.remaining!)} –¥—É—Ç—É—É –±–∞–π–Ω–∞</p>}<p>–•“Ø—Ä–≥—ç–ª—Ç–∏–π–Ω —Ç”©–ª–±”©—Ä –¥–æ–æ–¥ –¥“Ø–Ω–¥ —Ç–æ–æ—Ü–æ–≥–¥–æ—Ö–≥“Ø–π.</p></div>;
-
-  const copy = lang === "mn" ? {
-    eyebrow: "–ë”®”®–ù–ò–ô –•–£–î–ê–õ–î–ê–ê ¬∑ –û–ù–õ–ê–ô–ù –î–≠–õ–ì“Æ“Æ–†", title: "“Æ–π–ª–¥–≤—ç—Ä—ç—ç—Å —à—É—É–¥ –∑–∞—Ö–∏–∞–ª–∞–∞—Ä–∞–π",
-    intro: "”®–≥”©”©–º–∂ –ê—Ä—Ö–∞–¥—ã–Ω –±“Ø—Ç—ç—ç–≥–¥—ç—Ö“Ø“Ø–Ω“Ø“Ø–¥–∏–π–≥ —Å–æ–Ω–≥–æ–∂, —Ç–æ–æ —à–∏—Ä—Ö—ç–≥—ç—ç —Ç–æ—Ö–∏—Ä—É—É–ª–∞–Ω –∑–∞—Ö–∏–∞–ª–≥–∞–∞ –∏–ª–≥—ç—ç–Ω—ç “Ø“Ø.",
-    search: "–ë“Ø—Ç—ç—ç–≥–¥—ç—Ö“Ø“Ø–Ω —Ö–∞–π—Ö‚Ä¶", all: "–ë“Ø–≥–¥", add: "–°–∞–≥—Å–∞–Ω–¥ –Ω—ç–º—ç—Ö", details: "–î—ç–ª–≥—ç—Ä—ç–Ω–≥“Ø–π", sold: "–î—É—É—Å—Å–∞–Ω",
-    cart: "–°–∞–≥—Å", empty: "–¢–∞–Ω—ã —Å–∞–≥—Å —Ö–æ–æ—Å–æ–Ω –±–∞–π–Ω–∞.", continue: "–î—ç–ª–≥“Ø“Ø—Ä “Ø—Ä–≥—ç–ª–∂–ª“Ø“Ø–ª—ç—Ö", checkout: "–ó–∞—Ö–∏–∞–ª–≥–∞ “Ø—Ä–≥—ç–ª–∂–ª“Ø“Ø–ª—ç—Ö",
-    subtotal: "–ë–∞—Ä–∞–∞–Ω—ã –¥“Ø–Ω", deliveryNote: "–•“Ø—Ä–≥—ç–ª—Ç–∏–π–Ω —Ç”©–ª–±”©—Ä–∏–π–≥ –∑–∞—Ö–∏–∞–ª–≥–∞ –±–∞—Ç–∞–ª–≥–∞–∞–∂–∏—Ö “Ø–µ–¥ –º—ç–¥—ç—ç–ª–Ω—ç.",
-    checkoutTitle: "–ó–∞—Ö–∏–∞–ª–≥—ã–Ω –º—ç–¥—ç—ç–ª—ç–ª", firstName: "–ù—ç—Ä *", lastName: "–û–≤–æ–≥", phone: "–£—Ç–∞—Å *", email: "–ò-–º—ç–π–ª",
-    district: "–•–æ—Ç / –î“Ø“Ø—Ä—ç–≥ / –•–æ—Ä–æ–æ *", address: "–î—ç–ª–≥—ç—Ä—ç–Ω–≥“Ø–π —Ö–∞—è–≥ *", note: "–ù—ç–º—ç–ª—Ç —Ç—ç–º–¥—ç–≥–ª—ç–ª",
-    delivery: "–•“Ø–ª—ç—ç–Ω –∞–≤–∞—Ö —Ö—ç–ª–±—ç—Ä", deliveryOption: "–•“Ø—Ä–≥—ç–ª—Ç", pickup: "”®”©—Ä–∏–π–Ω –±–∏–µ—ç—Ä –∞–≤–∞—Ö",
-    payment: "–¢”©–ª–±”©—Ä–∏–π–Ω —Ö—ç–ª–±—ç—Ä", bank: "–î–∞–Ω—Å–∞–∞—Ä —à–∏–ª–∂“Ø“Ø–ª—ç—Ö", qpay: "QPay (–±–∞—Ç–∞–ª–≥–∞–∞–∂–∏—Ö —Ö“Ø—Ä—Ç—ç–ª pending)",
-    place: "–ó–∞—Ö–∏–∞–ª–≥–∞ –∏–ª–≥—ç—ç—Ö", sending: "–ò–ª–≥—ç—ç–∂ –±–∞–π–Ω–∞‚Ä¶", success: "–ó–∞—Ö–∏–∞–ª–≥–∞ –∞–º–∂–∏–ª—Ç—Ç–∞–π –±“Ø—Ä—Ç–≥—ç–≥–¥–ª—ç—ç",
-    successBody: "–ú–∞–Ω–∞–π –±–æ—Ä–ª—É—É–ª–∞–ª—Ç—ã–Ω –±–∞–≥ –∑–∞—Ö–∏–∞–ª–≥—ã–≥ —à–∞–ª–≥–∞–∂, —Ç”©–ª–±”©—Ä –±–æ–ª–æ–Ω —Ö“Ø—Ä–≥—ç–ª—Ç–∏–π–Ω –º—ç–¥—ç—ç–ª–ª–∏–π–≥ –±–∞—Ç–∞–ª–≥–∞–∞–∂—É—É–ª–Ω–∞.",
-    orderNo: "–ó–∞—Ö–∏–∞–ª–≥—ã–Ω –¥—É–≥–∞–∞—Ä", back: "–î—ç–ª–≥“Ø“Ø—Ä —Ä“Ø“Ø –±—É—Ü–∞—Ö", stock: "“Æ–ª–¥—ç–≥–¥—ç–ª", sheet: "Google Sheets –º—ç–¥—ç—ç–ª–ª–∏–π–Ω —Å–∞–Ω", prototype: "Prototype ”©–≥”©–≥–¥”©–ª",
-  } : {
-    eyebrow: "WHOLESALE ¬∑ ONLINE STORE", title: "Order directly from our factory",
-    intro: "Browse Uguumj Arkhad products, set quantities, and send your order in one place.",
-    search: "Search products‚Ä¶", all: "All", add: "Add to cart", details: "Details", sold: "Out of stock",
-    cart: "Cart", empty: "Your cart is empty.", continue: "Continue shopping", checkout: "Continue to checkout",
-    subtotal: "Subtotal", deliveryNote: "Delivery cost will be confirmed with your order.",
-    checkoutTitle: "Checkout information", firstName: "First name *", lastName: "Last name", phone: "Phone *", email: "Email",
-    district: "City / District *", address: "Delivery address *", note: "Order notes",
-    delivery: "Delivery method", deliveryOption: "Delivery", pickup: "Pick up",
-    payment: "Payment method", bank: "Bank transfer", qpay: "QPay (pending until confirmed)",
-    place: "Place order", sending: "Submitting‚Ä¶", success: "Order received",
-    successBody: "Our sales team will review your order and confirm payment and delivery details.",
-    orderNo: "Order number", back: "Back to store", stock: "Stock", sheet: "Google Sheets database", prototype: "Prototype data",
-  };
-
-  function go(next: View) {
-    if(next==="checkout"&&!checkoutAllowed)return;
-    setView(next); setFormError("");
-    const url = new URL(window.location.href);
-    if (next === "shop" || next === "success") url.searchParams.delete("view"); else url.searchParams.set("view", next);
-    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function add(product: Product, variant:ProductVariant, quantity:number) {
-    try {const line=makeCartLine(variant,(cart[variant.variant_id]?.quantity||0)+quantity);
-      setCart(current=>({...current,[variant.variant_id]:line}));
-      setNotice(`${nameOf(product,lang)} ¬∑ ${variant.variant_name_mn} —Å–∞–≥—Å–∞–Ω–¥ –Ω—ç–º—ç–≥–¥–ª—ç—ç`);
-      window.setTimeout(()=>setNotice(""),2200);
-    } catch {setNotice("“Æ–Ω—ç, –Ω”©”©—Ü —ç—Å–≤—ç–ª —Ç–æ–æ —à–∏—Ä—Ö—ç–≥–∏–π–≥ —à–∞–ª–≥–∞–Ω–∞ —É—É.");}
-  }
-  function changeQty(variant:ProductVariant,delta:number){
-    setCart(current=>{const next={...current};const quantity=(current[variant.variant_id]?.quantity||0)+delta;
-      if(quantity<=0)delete next[variant.variant_id];
-      else {try{next[variant.variant_id]=makeCartLine(variant,quantity);}catch{return current;}}
-      return next;
-    });
-  }
-
-  async function submitOrder(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setFormError("");
-    if(!checkoutAllowed){setFormError(`–ë–∞—Ä–∞–∞–Ω—ã –Ω–∏–π–ª–±—ç—Ä ${minimumText} –±–∞–π—Ö —à–∞–∞—Ä–¥–ª–∞–≥–∞—Ç–∞–π. “Æ–Ω—ç, –Ω”©”©—Ü”©”© —à–∞–ª–≥–∞–Ω–∞ —É—É.`);return;}
-    if (!customer.firstName.trim() || !customer.phone.trim() || !customer.cityDistrict.trim() || !customer.deliveryAddress.trim()) {
-      setFormError(lang === "mn" ? "–ù—ç—Ä, —É—Ç–∞—Å, –¥“Ø“Ø—Ä—ç–≥/—Ö–æ—Ä–æ–æ –±–æ–ª–æ–Ω —Ö“Ø—Ä–≥—ç–ª—Ç–∏–π–Ω —Ö–∞—è–≥–∞–∞ –±”©–≥–ª”©–Ω”© “Ø“Ø." : "Please enter your name, phone, district and delivery address.");
-      return;
-    }
-    if (!cartProducts.length) { setFormError(copy.empty); return; }
-    setSubmitting(true);
-    const payload = {
-      customer,
-      items: cartProducts.map(({line}) => ({ variant_id:line.variant_id, quantity:line.quantity })),
-      paymentMethod: customer.paymentMethod, deliveryMethod: customer.deliveryMethod, notes: customer.notes,
-    };
-    try {
-      const response = await fetch("/api/store/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json() as { orderNumber?: string; storage?: string; error?: string; code?: string; availableStock?: number };
-      if (result.code === "OUT_OF_STOCK" && typeof result.availableStock === "number") {
-        setFormError(lang === "mn" ? `–£—É—á–ª–∞–∞—Ä–∞–π, —ç–Ω—ç –±“Ø—Ç—ç—ç–≥–¥—ç—Ö“Ø“Ø–Ω—ç—ç—Å ${result.availableStock} —à–∏—Ä—Ö—ç–≥ “Ø–ª–¥—Å—ç–Ω –±–∞–π–Ω–∞.` : `Sorry, only ${result.availableStock} units of this product remain.`);
-        return;
-      }
-      if (!response.ok || result.storage !== "google-sheets" || !result.orderNumber) throw new Error(result.error || "Order failed");
-      setOrderNumber(result.orderNumber); setCart({}); setCustomer(EMPTY_CUSTOMER); go("success");
-    } catch {
-      setFormError(lang === "mn" ? "Prototype –¥—ç—ç—Ä –±–æ–¥–∏—Ç –∑–∞—Ö–∏–∞–ª–≥–∞ –∞–≤–∞—Ö –±–æ–ª–æ–º–∂ —Ö–∞—Ä–∞–∞—Ö–∞–Ω –Ω—ç—ç–≥–¥—ç—ç–≥“Ø–π." : "We couldn't submit the order. Please try again.");
-    } finally { setSubmitting(false); }
-  }
-
-  const field = (key: "firstName" | "lastName" | "phone" | "email" | "cityDistrict" | "deliveryAddress", label: string, wide = false) => (
-    <label className={wide ? "md:col-span-2" : ""}>
-      <span className="mb-2 block text-[10px] tracking-[.14em] text-[#5C3C2B]">{label}</span>
-      <input type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} value={customer[key]}
-        onChange={(event: ChangeEvent<HTMLInputElement>) => setCustomer((current) => ({ ...current, [key]: event.target.value }))}
-        className="w-full border border-[#F1EBDD] bg-[#FFFFFF] px-4 py-3 text-sm outline-none focus:border-[#F00028]" />
-    </label>
-  );
-
-  return <main className="min-h-screen bg-[#FFFFFF] text-[#1A1A1A]" style={{ fontFamily: "var(--app-font-sans), sans-serif" }}>
+Y™Áäx-ÆÈ‹j◊ù¢Îi∫⁄+äßj[hëÈ‹¢ÈÌ◊M}·:-jZ.∂õ≠ñ)ﬁ≥R'W6R6∆ñVÁB#∞†¶ñ◊˜'B≤W6TVffV7B¬W6T÷V÷Ú¬W6U7FFR¬GóR6ÜÊvTWfVÁB¬GóRf˜&‘WfVÁB“g&ˆ“'&V7B#∞¶ñ◊˜'B≤f&ñÁE&ñ6R¬÷∂T6'D∆ñÊR¬÷ñÊñ◊V‘˜&FW"¬VÊóD∆&V¬¬VÁFóGî∆&V¬¬vVñváD∆&V¬¬GóR&ˆGV7Ef&ñÁB¬GóR6'D∆ñÊR¬GóR˜&FW%6WGFñÊw2“g&ˆ“"‚‚Ú‚‚ˆ∆ñ"˜7F˜&T˜&FW&ñÊr#∞¶ñ◊˜'B&ˆGV7DFWFñ¬g&ˆ“"‚ı&ˆGV7DFWFñ¬#∞¶ñ◊˜'BGóR≤7F˜&U&ˆGV7B“g&ˆ“"‚‚Ú‚‚ˆ∆ñ"ˆvˆˆv∆U6ÜVWG57F˜&R#∞¶ñ◊˜'B7F˜&TÜVFW"g&ˆ“"‚ı7F˜&TÜVFW"#∞¶ñ◊˜'B67&ˆ∆≈&WfV¬g&ˆ“"‚‚ˆ6ˆ◊ˆÊVÁG2ı67&ˆ∆≈&WfV¬#∞†ßGóR∆Êr“&÷‚"¬&V‚#∞ßGóRfñWr“'6Ü˜"¬&6'B"¬&6ÜV6∂˜WB"¬'7V66W72#∞ßGóR&ˆGV7B“7F˜&U&ˆGV7C∞ßGóR7W7Fˆ÷W"“∞¢fó'7DÊ÷S¢7G&ñÊs≤∆7DÊ÷S¢7G&ñÊs≤ÜˆÊS¢7G&ñÊs≤V÷ñ√¢7G&ñÊs≤6óGîFó7G&ñ7C¢7G&ñÊs∞¢FV∆ófW'îFG&W73¢7G&ñÊs≤Ê˜FW3¢7G&ñÊs≤FV∆ófW'î÷WFÜˆC¢$DTƒïdU%í"¬%î4µU#∞¢ñ÷VÁD÷WFÜˆC¢$$‰µıE$Â4dU""¬%í#∞ß”∞†¶6ˆÁ7B4%EÙ¥Uí“'VwWV÷¢÷ˆÊ∆ñÊR◊7F˜&R÷6'B◊f&ñÁG2◊c"#∞¶6ˆÁ7BT’EïÙ5U5DÙ‘U#¢7W7Fˆ÷W"“∞¢fó'7DÊ÷S¢""¬∆7DÊ÷S¢""¬ÜˆÊS¢""¬V÷ñ√¢""¬6óGîFó7G&ñ7C¢""¬FV∆ófW'îFG&W73¢""¬Ê˜FW3¢""¿¢FV∆ófW'î÷WFÜˆC¢$DTƒïdU%í"¬ñ÷VÁD÷WFÜˆC¢$$‰µıE$Â4dU""¿ß”∞¶6ˆÁ7B÷ˆÊWí“áf«VS¢ÁV÷&W"í”‚G∂ÊWrñÁF¬‰ÁV÷&W$f˜&÷BÇ&V‚’U2"íÊf˜&÷Báf«VRóﬁ(*Ê∞¶6ˆÁ7B&ñ6Tˆb“á&ˆGV7C¢&ˆGV7Bí”‚÷FÇÊ÷ñ‚Ç‚‚‚á&ˆGV7BÁf&ñÁG7«≈µ“íÊ÷áf&ñÁE&ñ6RíÊfñ«FW"áÉ”ÁÉ„í¬ñÊfñÊóGíì∞¶6ˆÁ7BÊ÷Tˆb“á&ˆGV7C¢&ˆGV7B¬∆Ês¢∆Êrí”‚Ü∆Êr””“&÷‚"Ú&ˆGV7BÊÊ÷T÷‚¢&ˆGV7BÊÊ÷TV‚í«¬&ˆGV7BÊÊ÷T÷‚«¬&ˆGV7BÊÊ÷TV‚«¬&ˆGV7BÁ6∑S∞¶6ˆÁ7BFW64ˆb“á&ˆGV7C¢&ˆGV7B¬∆Ês¢∆Êrí”‚Ü∆Êr””“&÷‚"Ú&ˆGV7BÊFW67&óFñˆ‰÷‚¢&ˆGV7BÊFW67&óFñˆ‰V‚í«¬&ˆGV7BÊFW67&óFñˆ‰÷‚«¬&ˆGV7BÊFW67&óFñˆ‰V„∞¶6ˆÁ7B6FVv˜'îˆb“á&ˆGV7C¢&ˆGV7B¬∆Ês¢∆Êrí”‚Ü∆Êr””“&÷‚"Ú&ˆGV7BÊ6FVv˜'îÊ÷T÷‚¢&ˆGV7BÊ6FVv˜'îÊ÷TV‚í«¬&ˆGV7BÊ6FVv˜'îÊ÷T÷‚«¬&ˆGV7BÊ6FVv˜'îÊ÷TV‚«¬&ˆGV7BÊ6FVv˜'îñC∞†¶Wá˜'BFVfV«BgVÊ7Fñˆ‚vÜˆ∆W6∆U7F˜&T6∆ñVÁBá≤ñÊóFñƒ6F∆ˆwVR”¢≤ñÊóFñƒ6F∆ˆwVSÛ¢≤6WGFñÊw3¢˜&FW%6WGFñÊw3≤&ˆGV7G3¢&ˆGV7Eµ”≤6FVv˜&ñW3¢'&ì«≤ñC¢7G&ñÊs≤Ê÷T÷„¢7G&ñÊs≤Ê÷TV„¢7G&ñÊr”‚““í∞¢6ˆÁ7B∂∆Êr¬6WD∆Êu““W6U7FFSƒ∆Ês‚Ç&÷‚"ì∞¢6ˆÁ7B∑fñWr¬6WEfñWu““W6U7FFS≈fñWs‚Ç'6Ü˜"ì∞¢6ˆÁ7B∂î6FVv˜&ñW2¬6WDî6FVv˜&ñW5““W6U7FFSƒ'&ì«≤ñC¢7G&ñÊs≤Ê÷T÷„¢7G&ñÊs≤Ê÷TV„¢7G&ñÊr”„‚ÜñÊóFñƒ6F∆ˆwVSÚÊ6FVv˜&ñW2«¬µ“ì∞¢6ˆÁ7B∑6WGFñÊw2¬6WE6WGFñÊw5““W6U7FFSƒ˜&FW%6WGFñÊw7∆ÁV∆√‚ÜñÊóFñƒ6F∆ˆwVSÚÁ6WGFñÊw2«¬ÁV∆¬ì∞¢6ˆÁ7B∑&Wfó6ñˆ‚¬6WE&Wfó6ñˆÂ““W6U7FFRÉì∞¢6ˆÁ7B∑&ˆGV7G2¬6WE&ˆGV7G5““W6U7FFS≈&ˆGV7Eµ”‚ÜñÊóFñƒ6F∆ˆwVSÚÁ&ˆGV7G2«¬µ“ì∞†¢6ˆÁ7B∂∆ˆFñÊr¬6WD∆ˆFñÊu““W6U7FFRÇñÊóFñƒ6F∆ˆwVRì∞¢6ˆÁ7B∂∆ˆDW'&˜"¬6WD∆ˆDW'&˜%““W6U7FFRÇ""ì∞¢6ˆÁ7B∂6FVv˜'í¬6WD6FVv˜'ï““W6U7FFRÇ$ƒ¬"ì∞¢6ˆÁ7B∑VW'í¬6WEVW'ï““W6U7FFRÇ""ì∞¢6ˆÁ7B∂6'D∆ˆFVB¬6WD6'D∆ˆFVE““W6U7FFRÜf«6Rì∞¢6ˆÁ7B∂6'B¬6WD6'E““W6U7FFS≈&V6˜&C«7G&ñÊr¬6'D∆ñÊS„‚á∑“ì∞¢6ˆÁ7B∑6V∆V7FVB¬6WE6V∆V7FVE““W6U7FFS≈&ˆGV7B¬ÁV∆√‚ÜÁV∆¬ì∞¢6ˆÁ7B∂7W7Fˆ÷W"¬6WD7W7Fˆ÷W%““W6U7FFSƒ7W7Fˆ÷W#‚ÑT’EïÙ5U5DÙ‘U"ì∞¢6ˆÁ7B∑7V&÷óGFñÊr¬6WE7V&÷óGFñÊu““W6U7FFRÜf«6Rì∞¢6ˆÁ7B∂f˜&‘W'&˜"¬6WDf˜&‘W'&˜%““W6U7FFRÇ""ì∞¢6ˆÁ7B∂˜&FW$ÁV÷&W"¬6WD˜&FW$ÁV÷&W%““W6U7FFRÇ""ì∞¢6ˆÁ7B∂Ê˜Fñ6R¬6WDÊ˜Fñ6U““W6U7FFRÇ""ì∞†¢W6TVffV7BÇÇí”‚∞¢G'í∞¢6ˆÁ7B6fVD∆Êr“∆ˆ6≈7F˜&vRÊvWDóFV“Ç'VwWV÷¢÷∆Êr"ì∞¢ñbá6fVD∆Êr””“&V‚"í6WD∆ÊrÇ&V‚"ì∞¢6ˆÁ7B6fVD6'B“∆ˆ6≈7F˜&vRÊvWDóFV“Ñ4%EÙ¥Uíì∞¢ñbá6fVD6'Bí∞¢6ˆÁ7Bf«VR“•4Ù‚Á'6Rá6fVD6'Bì∞¢ñbáf«VRbbGóVˆbf«VR””“&ˆ&¶V7B"bb'&íÊó4'&íáf«VRíí6WD6'BÑˆ&¶V7BÊg&ˆ‘VÁG&ñW2Ñˆ&¶V7BÊVÁG&ñW2áf«VRíÊfñ«FW"ÇÖ≤∆∆ñÊU“í”‚∆ñÊRbbGóVˆb∆ñÊR””“vˆ&¶V7BrbbGóVˆbÜ∆ñÊR26'D∆ñÊRíÁf&ñÁEˆñC””“w7G&ñÊrrbbÁV÷&W"Êó56fTñÁFVvW"ÇÜ∆ñÊR26'D∆ñÊRíÁVÁFóGííbbÜ∆ñÊR26'D∆ñÊRíÁVÁFóGì„íí2&V6˜&C«7G&ñÊrƒ6'D∆ñÊS‚ì∞¢–¢6ˆÁ7B&WVW7FVB“ÊWrU$≈6V&6Ö&◊2ávñÊF˜rÊ∆ˆ6Fñˆ‚Á6V&6ÇíÊvWBÇ'fñWr"ì∞¢ñbá&WVW7FVB””“&6'B"«¬&WVW7FVB””“&6ÜV6∂˜WB"í6WEfñWrá&WVW7FVBì∞¢“6F6Ç≤Ú¢∆ˆ6¬7F˜&vRó2˜FñˆÊ¬¢Ú–¢6WD6'D∆ˆFVBáG'VRì∞¢“¬µ“ì∞†¢W6TVffV7BÇÇí”‚∞¢ñbÇ6'D∆ˆFVBí&WGW&„∞¢G'í≤∆ˆ6≈7F˜&vRÁ6WDóFV“Ñ4%EÙ¥Uí¬•4Ù‚Á7G&ñÊvñgíÜ6'Bíì≤“6F6Ç≤Ú¢˜FñˆÊ¬¢Ú–¢“¬∂6'B¬6'D∆ˆFVE“ì∞†¢W6TVffV7BÇÇí”‚∞¢6ˆÁ7B&Vg&W6Ç“Çí”‚6WE&Wfó6ñˆ‚Çáf«VRí”‚f«VR≤ì∞¢6ˆÁ7BFñ÷W"“vñÊF˜rÁ6WDñÁFW'f¬á&Vg&W6Ç¬cì∞¢vñÊF˜rÊFDWfVÁD∆ó7FVÊW"Ç&fˆ7W2"¬&Vg&W6Çì∞¢&WGW&‚Çí”‚≤vñÊF˜rÊ6∆V$ñÁFW'f¬áFñ÷W"ì≤vñÊF˜rÁ&V÷˜fTWfVÁD∆ó7FVÊW"Ç&fˆ7W2"¬&Vg&W6Çì≤”∞¢“¬µ“ì∞†¢W6TVffV7BÇÇí”‚∞¢∆WB7FófR“G'VS∞¢6WD∆ˆFñÊráG'VRì∞¢fWF6ÇÇ"ˆí˜7F˜&R˜&ˆGV7G2"¬≤66ÜS¢&ÊÚ◊7F˜&R"“ê¢ÁFÜV‚Ü7ñÊ2á&W7ˆÁ6Rí”‚∞¢6ˆÁ7Bñ∆ˆB“vóB&W7ˆÁ6RÊß6ˆ‚Çí2≤6WGFñÊw3Û¢˜&FW%6WGFñÊw3≤&ˆGV7G3Û¢&ˆGV7Eµ”≤6FVv˜&ñW3Û¢'&ì«≤ñC¢7G&ñÊs≤Ê÷T÷„¢7G&ñÊs≤Ê÷TV„¢7G&ñÊr”„≤6˜W&6SÛ¢7G&ñÊs≤W'&˜#Û¢7G&ñÊr”∞¢ñbÇ&W7ˆÁ6RÊˆ≤íFá&˜rÊWrW'&˜"áñ∆ˆBÊW'&˜"«¬%7F˜&RFFVÊfñ∆&∆R"ì∞¢&WGW&‚ñ∆ˆC∞¢“ê¢ÁFÜV‚Çáñ∆ˆBí”‚∞¢ñbÇ7FófRí&WGW&„∞¢6WE&ˆGV7G2Ñ'&íÊó4'&íáñ∆ˆBÁ&ˆGV7G2íÚñ∆ˆBÁ&ˆGV7G2¢µ“ì∞¢6WDî6FVv˜&ñW2áñ∆ˆBÊ6FVv˜&ñW2«¬µ“ì∞¢6WE6WGFñÊw2áñ∆ˆBÁ6WGFñÊw2«¬ÁV∆¬ì∞†¢6WD∆ˆDW'&˜"Ç""ì∞¢“ê¢Ê6F6ÇÇÇí”‚∞¢ñbÇ7FófRí&WGW&„∞¢6WE&ˆGV7G2Öµ“ì∞¢6WDî6FVv˜&ñW2Öµ“ì∞¢6WD∆ˆDW'&˜"Ü∆Êr””“&÷‚"Ú-	M›Ω=*˝*˝çù“Õ›M››ΩΩçù2}Ωb}M›=*˝í‚"¢%7F˜&RFF6˜V∆BÊ˜B&R∆ˆFVB‚"ì∞¢“ê¢ÊfñÊ∆«íÇÇí”‚≤ñbÜ7FófRí6WD∆ˆFñÊrÜf«6Rì≤“ì∞¢&WGW&‚Çí”‚≤7FófR“f«6S≤”∞¢“¬∂∆Êr¬&Wfó6ñˆÂ“ì∞†¢W6TVffV7BÇÇí”‚∞¢6WE6V∆V7FVBÇÜ7W'&VÁBí”‚7W'&VÁBÚ&ˆGV7G2ÊfñÊBÇá&ˆGV7Bí”‚&ˆGV7BÊñB””“7W'&VÁBÊñBí«¬ÁV∆¬¢ÁV∆¬ì∞¢“¬∑&ˆGV7G5“ì∞†¢6ˆÁ7B6FVv˜&ñW2“W6T÷V÷ÚÇÇí”‚î6FVv˜&ñW2Ê÷ÇÜóFV“í”‚∂óFV“ÊñB¬Ü∆Êr””“&÷‚"ÚóFV“ÊÊ÷T÷‚¢óFV“ÊÊ÷TV‚í«¬óFV“ÊÊ÷T÷‚«¬óFV“ÊÊ÷TVÂ“í¬∂î6FVv˜&ñW2¬∆Êu“ì∞†¢6ˆÁ7Bfñ«FW&VB“W6T÷V÷ÚÇÇí”‚∞¢6ˆÁ7B6V&6Ç“VW'íÁG&ñ“ÇíÁFÙ∆˜vW$66RÇì∞¢&WGW&‚&ˆGV7G2Êfñ«FW"Çá&ˆGV7Bí”‚∞¢6ˆÁ7B6FVv˜'î÷F6Ç“6FVv˜'í””“$ƒ¬"«¬&ˆGV7BÊ6FVv˜'îñB””“6FVv˜'ì∞¢6ˆÁ7BÜó7F6≤“G∑&ˆGV7BÊÊ÷T÷Á“G∑&ˆGV7BÊÊ÷TVÁ“G∂FW64ˆbá&ˆGV7B¬∆Êró“G∂6FVv˜'îˆbá&ˆGV7B¬∆Êró“G≤á&ˆGV7BÁf&ñÁG7«≈µ“íÊ÷ác”ÁbÁ6∑RíÊ¶ˆñ‚Ç""ó÷ÁFÙ∆˜vW$66RÇì∞¢&WGW&‚6FVv˜'î÷F6ÇbbÇ6V&6Ç«¬Üó7F6≤ÊñÊ6«VFW2á6V&6Çíì∞¢“íÁ6˜'BÇÜ¬"í”‚ÁV÷&W"Ü"ÊfVGW&VBí“ÁV÷&W"ÜÊfVGW&VBíì∞¢“¬∑&ˆGV7G2¬6FVv˜'í¬VW'í¬∆Êu“ì∞†¢6ˆÁ7B6'E&ˆGV7G2“W6T÷V÷ÚÇÇí”‚ˆ&¶V7BÁf«VW2Ü6'BíÊ÷á6fVB”‚∞¢6ˆÁ7B&ˆGV7C◊&ˆGV7G2ÊfñÊBá”ÁÊñC””◊6fVBÁ&ˆGV7EˆñBì∞¢6ˆÁ7Bf&ñÁC◊&ˆGV7CÚÁf&ñÁG3ÚÊfñÊBác”ÁbÁf&ñÁEˆñC””◊6fVBÁf&ñÁEˆñBì∞¢ñbÇ&ˆGV7G«¬f&ñÁBó&WGW&‚ÁV∆√∞¢G'ó∑&WGW&‚∑&ˆGV7B«f&ñÁB∆∆ñÊS¶÷∂T6'D∆ñÊRáf&ñÁB«6fVBÁVÁFóGíí«f∆ñCßG'VW”∑–¢6F6á∑&WGW&‚∑&ˆGV7B«f&ñÁB∆∆ñÊSß≤‚‚Á6fVB«VÊóE˜&ñ6Sßf&ñÁE&ñ6Ráf&ñÁBó“«f∆ñC¶f«6W”∑–¢“íÊfñ«FW"ÇáÇìßÇó2Êˆ‰ÁV∆∆&∆S«GóVˆbÉ„”‚Çí≈∂6'B«&ˆGV7G5“ì∞¢6ˆÁ7B6'D6˜VÁB“ˆ&¶V7BÊ∂Wó2Ü6'BíÊ∆VÊwFÉ∞¢6ˆÁ7B7V'F˜F¬“6'E&ˆGV7G2Á&VGV6RÇá7V“∆óFV“ì”Á7V“∂óFV“Ê∆ñÊRÁVÊóE˜&ñ6R¶óFV“Ê∆ñÊRÁVÁFóGí√ì∞¢6ˆÁ7B÷ñÊñ◊V”÷÷ñÊñ◊V‘˜&FW"á7V'F˜F¬«6WGFñÊw2ì∞¢6ˆÁ7B6ÜV6∂˜WD∆∆˜vVC÷÷ñÊñ◊V“Ê∆∆˜vVBbf6'E&ˆGV7G2Ê∆VÊwFÉ„bf6'E&ˆGV7G2Ê∆VÊwFÉ””‘ˆ&¶V7BÊ∂Wó2Ü6'BíÊ∆VÊwFÇbf6'E&ˆGV7G2ÊWfW'íáÉ”ÁÇÁf∆ñBì∞¢6ˆÁ7B÷ñÊñ◊V’FWáC◊6WGFñÊw2ÚG∂÷ˆÊWíá6WGFñÊw2Ê÷ñÊñ◊V’ˆ˜&FW%ˆ÷˜VÁBó“›:ù:ùM››Ü¢-	MÌÌBM*˝›=çù“Õ›M››Ω›≤}Ωbù›#∞¢6ˆÁ7B÷ñÊñ◊V‘Ê˜Fñ6S”∆Fób6∆74Ê÷S“&◊í”R76R◊í”"FWáB◊6“∆VFñÊr”b#„«Ì	}]çΩ=Ω“MÌÌBM*˝”¢«7G&ˆÊsÁ∂÷ñÊñ◊V’FWáG”¬˜7G&ˆÊs„¬˜Á≤÷ñÊñ◊V“Ê∆∆˜vVBbc«Ì	}]çΩ=:ù=:ù]çù“-=ΩB›≤›çùΩ›∂÷ñÊñ◊V’FWáG“ùRçMΩ=-í„¬˜Á◊≤Ü÷ñÊñ◊V“Á&V÷ñÊñÊsÛÛì„bc«6∆74Ê÷S“'FWáB’≤4c#Ö“#Ì	MÌÌB}]çΩ=B]*˝›]›C¢∂÷ˆÊWíÜ÷ñÊñ◊V“Á&V÷ñÊñÊró“M=-=2ù›¬˜Á”«Ì
+]*˝=›Ω-çù“-:ùΩ:ùMÌÌBM*˝›B-ÌÌmÌ=MÌ]=*˝í„¬˜„¬ˆFóc„∞†¢6ˆÁ7B6˜í“∆Êr””“&÷‚"Ú∞¢WñV'&˜s¢-	:ç:ç	›	ç	í
+]
+=	M		Ω	M		+r	Ì	›	Ω		ù	“	M
+›	Ω	=*Ì*Ì
+"¬FóF∆S¢-*ÌùΩM-›››ç==B}]çΩí"¿¢ñÁG&Û¢-:ç=:ù:ùÕb	]MΩ“*˝-››=M›]*˝*˝›*˝*˝Mçù2Ì›=Ìb¬-Ì‚çç]›=›“-Ì]ç==Ω“}]çΩ=çΩ=›››“*˝*Ú‚"¿¢6V&6É¢-	*˝-››=M›]*˝*˝“]ù^(
+b"¬∆√¢-	*˝=B"¬FC¢-
+=›B››Õ›R"¬FWFñ«3¢-	M›Ω=›››=*˝í"¬6ˆ∆C¢-	M==“"¿¢6'C¢-
+="¬V◊Gì¢-
+-›≤=]ÌÌÌ“ù›‚"¬6ˆÁFñÁVS¢-	M›Ω=*˝*˝*˝=›ΩmΩ*˝*˝Ω›R"¬6ÜV6∂˜WC¢-	}]çΩ=*˝=›ΩmΩ*˝*˝Ω›R"¿¢7V'F˜F√¢-	›≤M*˝“"¬FV∆ófW'îÊ˜FS¢-
+]*˝=›Ω-çù“-:ùΩ:ùçù2}]çΩ=-Ω=mçR*˝]BÕ›M››Ω›“‚"¿¢6ÜV6∂˜WEFóF∆S¢-	}]çΩ=Ω“Õ›M››Ω›≤"¬fó'7DÊ÷S¢-	››¢"¬∆7DÊ÷S¢-	Ì-Ì2"¬ÜˆÊS¢-
+=-¢"¬V÷ñ√¢-	Ç›Õ›ù≤"¿¢Fó7G&ñ7C¢-
+]Ì"Ú	M*˝*˝›2Ú
+]ÌÌ‚¢"¬FG&W73¢-	M›Ω=›››=*˝í]˝2¢"¬Ê˜FS¢-	››Õ›Ω"-›ÕM›=Ω›≤"¿¢FV∆ófW'ì¢-
+]*˝Ω››“-R]›Ω›"¬FV∆ófW'î˜Fñˆ„¢-
+]*˝=›Ω""¬ñ6∑W¢-:ç:ùçù“ç]›-R"¿¢ñ÷VÁC¢-
+-:ùΩ:ùçù“]›Ω›"¬&Ê≥¢-	M›ççΩm*˝*˝Ω›R"¬ì¢%íç-Ω=mçR]*˝-›≤VÊFñÊrí"¿¢∆6S¢-	}]çΩ=çΩ=››R"¬6VÊFñÊs¢-	çΩ=››bù›(
+b"¬7V66W73¢-	}]çΩ=ÕmçΩ--í*˝-=›=MΩ›“"¿¢7V66W74&ˆGì¢-	Õ›íÌΩ==ΩΩ-Ω“2}]çΩ=Ω2çΩ=b¬-:ùΩ:ùÌΩÌ“]*˝=›Ω-çù“Õ›M››ΩΩçù2-Ω=m==Ω›‚"¿¢˜&FW$ÊÛ¢-	}]çΩ=Ω“M=="¬&6≥¢-	M›Ω=*˝*˝*˝*Ú=mR"¬7Fˆ6≥¢-*ÌΩM›=M›≤"¬6ÜVWC¢$vˆˆv∆R6ÜVWG2Õ›M››ΩΩçù““"¬&˜F˜GóS¢%&˜F˜GóR:ù=:ù=M:ù≤"¿¢“¢∞¢WñV'&˜s¢%tÑÙƒU4ƒR+rÙ‰ƒî‰R5Dı$R"¬FóF∆S¢$˜&FW"Fó&V7F«íg&ˆ“˜W"f7F˜'í"¿¢ñÁG&Û¢$'&˜w6RVwWV÷¢&∂ÜB&ˆGV7G2¬6WBVÁFóFñW2¬ÊB6VÊBñ˜W"˜&FW"ñ‚ˆÊR∆6R‚"¿¢6V&6É¢%6V&6Ç&ˆGV7G>(
+b"¬∆√¢$∆¬"¬FC¢$FBFÚ6'B"¬FWFñ«3¢$FWFñ«2"¬6ˆ∆C¢$˜WBˆb7Fˆ6≤"¿¢6'C¢$6'B"¬V◊Gì¢%ñ˜W"6'Bó2V◊Gí‚"¬6ˆÁFñÁVS¢$6ˆÁFñÁVR6Ü˜ñÊr"¬6ÜV6∂˜WC¢$6ˆÁFñÁVRFÚ6ÜV6∂˜WB"¿¢7V'F˜F√¢%7V'F˜F¬"¬FV∆ófW'îÊ˜FS¢$FV∆ófW'í6˜7Bvñ∆¬&R6ˆÊfó&÷VBvóFÇñ˜W"˜&FW"‚"¿¢6ÜV6∂˜WEFóF∆S¢$6ÜV6∂˜WBñÊf˜&÷Fñˆ‚"¬fó'7DÊ÷S¢$fó'7BÊ÷R¢"¬∆7DÊ÷S¢$∆7BÊ÷R"¬ÜˆÊS¢%ÜˆÊR¢"¬V÷ñ√¢$V÷ñ¬"¿¢Fó7G&ñ7C¢$6óGíÚFó7G&ñ7B¢"¬FG&W73¢$FV∆ófW'íFG&W72¢"¬Ê˜FS¢$˜&FW"Ê˜FW2"¿¢FV∆ófW'ì¢$FV∆ófW'í÷WFÜˆB"¬FV∆ófW'î˜Fñˆ„¢$FV∆ófW'í"¬ñ6∑W¢%ñ6≤W"¿¢ñ÷VÁC¢%ñ÷VÁB÷WFÜˆB"¬&Ê≥¢$&Ê≤G&Á6fW""¬ì¢%íáVÊFñÊrVÁFñ¬6ˆÊfó&÷VBí"¿¢∆6S¢%∆6R˜&FW""¬6VÊFñÊs¢%7V&÷óGFñÊ~(
+b"¬7V66W73¢$˜&FW"&V6VófVB"¿¢7V66W74&ˆGì¢$˜W"6∆W2FV“vñ∆¬&WfñWrñ˜W"˜&FW"ÊB6ˆÊfó&“ñ÷VÁBÊBFV∆ófW'íFWFñ«2‚"¿¢˜&FW$ÊÛ¢$˜&FW"ÁV÷&W""¬&6≥¢$&6≤FÚ7F˜&R"¬7Fˆ6≥¢%7Fˆ6≤"¬6ÜVWC¢$vˆˆv∆R6ÜVWG2FF&6R"¬&˜F˜GóS¢%&˜F˜GóRFF"¿¢”∞†¢gVÊ7Fñˆ‚vÚÜÊWáC¢fñWrí∞¢ñbÜÊWáC””“&6ÜV6∂˜WB"bb6ÜV6∂˜WD∆∆˜vVBó&WGW&„∞¢6WEfñWrÜÊWáBì≤6WDf˜&‘W'&˜"Ç""ì∞¢6ˆÁ7BW&¬“ÊWrU$¬ávñÊF˜rÊ∆ˆ6Fñˆ‚Êá&Vbì∞¢ñbÜÊWáB””“'6Ü˜"«¬ÊWáB””“'7V66W72"íW&¬Á6V&6Ö&◊2ÊFV∆WFRÇ'fñWr"ì≤V«6RW&¬Á6V&6Ö&◊2Á6WBÇ'fñWr"¬ÊWáBì∞¢vñÊF˜rÊÜó7F˜'íÁ&W∆6U7FFRá∑“¬""¬G∑W&¬ÁFÜÊ÷W“G∑W&¬Á6V&6á÷ì∞¢vñÊF˜rÁ67&ˆ∆≈FÚá≤F˜¢¬&VÜfñ˜#¢'6÷ˆ˜FÇ"“ì∞¢–†¢gVÊ7Fñˆ‚FBá&ˆGV7C¢&ˆGV7B¬f&ñÁC•&ˆGV7Ef&ñÁB¬VÁFóGì¶ÁV÷&W"í∞¢G'í∂6ˆÁ7B∆ñÊS÷÷∂T6'D∆ñÊRáf&ñÁB¬Ü6'E∑f&ñÁBÁf&ñÁEˆñE”ÚÁVÁFóGó«√í∑VÁFóGíì∞¢6WD6'BÜ7W'&VÁC”‚á≤‚‚Ê7W'&VÁB≈∑f&ñÁBÁf&ñÁEˆñE”¶∆ñÊW“íì∞¢6WDÊ˜Fñ6RÜG∂Ê÷Tˆbá&ˆGV7B∆∆Êró“+rG∑f&ñÁBÁf&ñÁEˆÊ÷Uˆ÷Á“=›B››Õ›=MΩ›÷ì∞¢vñÊF˜rÁ6WEFñ÷V˜WBÇÇì”Á6WDÊ˜Fñ6RÇ""í√##ì∞¢“6F6Ç∑6WDÊ˜Fñ6RÇ-*Ì›“¬›:ù:ùb›-›≤-Ì‚çç]›=çù2çΩ=›=2‚"ì∑–¢–¢gVÊ7Fñˆ‚6ÜÊvUGíáf&ñÁC•&ˆGV7Ef&ñÁB∆FV«F¶ÁV÷&W"ó∞¢6WD6'BÜ7W'&VÁC”Á∂6ˆÁ7BÊWáC◊≤‚‚Ê7W'&VÁG”∂6ˆÁ7BVÁFóGì“Ü7W'&VÁE∑f&ñÁBÁf&ñÁEˆñE”ÚÁVÁFóGó«√í∂FV«F∞¢ñbáVÁFóGì√”ñFV∆WFRÊWáE∑f&ñÁBÁf&ñÁEˆñE”∞¢V«6R∑G'ó∂ÊWáE∑f&ñÁBÁf&ñÁEˆñE”÷÷∂T6'D∆ñÊRáf&ñÁB«VÁFóGíì∑÷6F6á∑&WGW&‚7W'&VÁC∑◊–¢&WGW&‚ÊWáC∞¢“ì∞¢–†¢7ñÊ2gVÊ7Fñˆ‚7V&÷óD˜&FW"ÜWfVÁC¢f˜&‘WfVÁCƒÖD‘ƒf˜&‘V∆V÷VÁC‚í∞¢WfVÁBÁ&WfVÁDFVfV«BÇì≤6WDf˜&‘W'&˜"Ç""ì∞¢ñbÇ6ÜV6∂˜WD∆∆˜vVBó∑6WDf˜&‘W'&˜"Ü	›≤›çùΩ›G∂÷ñÊñ◊V’FWáG“ùRçMΩ=-í‚*Ì›“¬›:ù:ùm:ù:íçΩ=›=2Êì∑&WGW&„∑–¢ñbÇ7W7Fˆ÷W"Êfó'7DÊ÷RÁG&ñ“Çí«¬7W7Fˆ÷W"ÁÜˆÊRÁG&ñ“Çí«¬7W7Fˆ÷W"Ê6óGîFó7G&ñ7BÁG&ñ“Çí«¬7W7Fˆ÷W"ÊFV∆ófW'îFG&W72ÁG&ñ“Çíí∞¢6WDf˜&‘W'&˜"Ü∆Êr””“&÷‚"Ú-	››¬=-¬M*˝*˝›2˝]ÌÌ‚ÌΩÌ“]*˝=›Ω-çù“]˝=:ù=Ω:ù›:í*˝*Ú‚"¢%∆V6RVÁFW"ñ˜W"Ê÷R¬ÜˆÊR¬Fó7G&ñ7BÊBFV∆ófW'íFG&W72‚"ì∞¢&WGW&„∞¢–¢ñbÇ6'E&ˆGV7G2Ê∆VÊwFÇí≤6WDf˜&‘W'&˜"Ü6˜íÊV◊Gíì≤&WGW&„≤–¢6WE7V&÷óGFñÊráG'VRì∞¢6ˆÁ7Bñ∆ˆB“∞¢7W7Fˆ÷W"¿¢óFV◊3¢6'E&ˆGV7G2Ê÷Çá∂∆ñÊW“í”‚á≤f&ñÁEˆñC¶∆ñÊRÁf&ñÁEˆñB¬VÁFóGì¶∆ñÊRÁVÁFóGí“íí¿¢ñ÷VÁD÷WFÜˆC¢7W7Fˆ÷W"Áñ÷VÁD÷WFÜˆB¬FV∆ófW'î÷WFÜˆC¢7W7Fˆ÷W"ÊFV∆ófW'î÷WFÜˆB¬Ê˜FW3¢7W7Fˆ÷W"ÊÊ˜FW2¿¢”∞¢G'í∞¢6ˆÁ7B&W7ˆÁ6R“vóBfWF6ÇÇ"ˆí˜7F˜&Rˆ˜&FW'2"¬≤÷WFÜˆC¢%ı5B"¬ÜVFW'3¢≤$6ˆÁFVÁB’GóR#¢&∆ñ6Fñˆ‚ˆß6ˆ‚"“¬&ˆGì¢•4Ù‚Á7G&ñÊvñgíáñ∆ˆBí“ì∞¢6ˆÁ7B&W7V«B“vóB&W7ˆÁ6RÊß6ˆ‚Çí2≤˜&FW$ÁV÷&W#Û¢7G&ñÊs≤7F˜&vSÛ¢7G&ñÊs≤W'&˜#Û¢7G&ñÊs≤6ˆFSÛ¢7G&ñÊs≤fñ∆&∆U7Fˆ6≥Û¢ÁV÷&W"”∞¢ñbá&W7V«BÊ6ˆFR””“$ıUEÙÙeı5DÙ4≤"bbGóVˆb&W7V«BÊfñ∆&∆U7Fˆ6≤””“&ÁV÷&W""í∞¢6WDf˜&‘W'&˜"Ü∆Êr””“&÷‚"Ú
+==}Ωí¬››“*˝-››=M›]*˝*˝›››G∑&W7V«BÊfñ∆&∆U7Fˆ6∑“çç]›2*˝ΩM›“ù›Ê¢6˜''í¬ˆÊ«íG∑&W7V«BÊfñ∆&∆U7Fˆ6∑“VÊóG2ˆbFÜó2&ˆGV7B&V÷ñ‚Êì∞¢&WGW&„∞¢–¢ñbÇ&W7ˆÁ6RÊˆ≤«¬&W7V«BÁ7F˜&vR”“&vˆˆv∆R◊6ÜVWG2"«¬&W7V«BÊ˜&FW$ÁV÷&W"íFá&˜rÊWrW'&˜"á&W7V«BÊW'&˜"«¬$˜&FW"fñ∆VB"ì∞¢6WD˜&FW$ÁV÷&W"á&W7V«BÊ˜&FW$ÁV÷&W"ì≤6WD6'Bá∑“ì≤6WD7W7Fˆ÷W"ÑT’EïÙ5U5DÙ‘U"ì≤vÚÇ'7V66W72"ì∞¢“6F6Ç∞¢6WDf˜&‘W'&˜"Ü∆Êr””“&÷‚"Ú%&˜F˜GóRM››ÌMç"}]çΩ=-RÌΩÌÕb]]“›››=M››=*˝í‚"¢%vR6˜V∆F‚wB7V&÷óBFÜR˜&FW"‚∆V6RG'ívñ‚‚"ì∞¢“fñÊ∆«í≤6WE7V&÷óGFñÊrÜf«6Rì≤–¢–†¢6ˆÁ7BfñV∆B“Ü∂Wì¢&fó'7DÊ÷R"¬&∆7DÊ÷R"¬'ÜˆÊR"¬&V÷ñ¬"¬&6óGîFó7G&ñ7B"¬&FV∆ófW'îFG&W72"¬∆&V√¢7G&ñÊr¬vñFR“f«6Rí”‚Ä¢∆∆&V¬6∆74Ê÷S◊∑vñFRÚ&÷C¶6ˆ¬◊7‚”""¢"'”‡¢«7‚6∆74Ê÷S“&÷"”"&∆ˆ6≤FWáB’≥Ö“G&6∂ñÊr’≤„FV’“FWáB’≤3T343$%“#Á∂∆&V«”¬˜7„‡¢∆ñÁWBGóS◊∂∂Wí””“&V÷ñ¬"Ú&V÷ñ¬"¢∂Wí””“'ÜˆÊR"Ú'FV¬"¢'FWáB'“fÕ}‚⁄$z{-ÆÈ‹j◊ù}>
+    <style>{` .store-ui button,.store-ui input,.store-ui textarea{border-radius:8px}.store-ui input,.store-ui textarea{border-radius:6px}.category-filters{display:flex;flex-wrap:wrap;gap:10px}.category-filters button{border-radius:999px!important;padding-inline:18px}.cart-summary,.checkout-summary{border-radius:12px}.checkout-section{border:0!important;border-top:1px solid #F1EBDD!important;background:transparent!important;padding:28px 0!important}.checkout-section legend{padding:0 0 14px!important}.choice-card{border-radius:10px!important;border:1px solid #E7DDCB!important;background:#fff!important;color:#5C3C2B!important;transition:all .2s}.choice-card.selected{border-color:#F00028!important;background:#FFF4F4!important}.cart-row{grid-template-columns:96px minmax(0,1fr) auto!important;align-items:center}.cart-row img{border-radius:10px}.cart-item-actions{display:grid!important;grid-template-columns:auto 36px;grid-template-rows:auto auto auto;grid-column:3;grid-row:1;min-width:116px;align-items:center;justify-items:end;column-gap:8px;row-gap:4px}.cart-item-actions .cart-line-total{grid-column:1/3;grid-row:1}.cart-item-actions .cart-quantity-label{grid-column:1/3;grid-row:2}.cart-item-actions .cart-stepper{grid-column:1;grid-row:3}.cart-item-actions .cart-remove{grid-column:2;grid-row:3}.cart-stepper{border-radius:8px!important;overflow:hidden}.cart-stepper button,.cart-stepper span{min-width:0}.cart-stepper-value{width:36px}.cart-remove svg{width:19px;height:19px}.cart-remove:hover{color:#F00028}.summary-progress{height:7px;border-radius:999px;background:#E7DDCB;overflow:hidden}.summary-progress>span{display:block;height:100%;border-radius:999px;background:#F00028;transition:width .25s}.store-ui .detail-add{border-radius:8px}@media(max-width:640px){.cart-row{grid-template-columns:76px minmax(0,1fr)!important;align-items:start}.cart-item-actions{grid-column:2;grid-row:2;min-width:0;justify-items:start;gap:4px!important}.cart-summary{position:static!important}}`}</style>
     <StoreHeader lang={lang} cartCount={cartCount} onLanguage={(next) => { setLang(next); document.documentElement.lang = next; try { localStorage.setItem("uguumj-lang", next); } catch {} }} />
     {notice && <div className="fixed right-5 top-28 z-50 bg-[#1A1A1A] px-5 py-3 text-sm text-white shadow-xl">{notice}</div>}
 
     {view === "shop" && <>
       <section className="border-b border-[#F1EBDD] bg-[#F1EBDD]"><div className="mx-auto grid max-w-[1540px] gap-10 px-5 py-16 md:px-10 md:py-24 lg:grid-cols-[1.3fr_.7fr] lg:px-14"><ScrollReveal from="left" duration={780}><div><p className="mb-5 text-[11px] font-bold tracking-[.22em] text-[#F00028]">{copy.eyebrow}</p><h1 className="max-w-4xl text-4xl leading-[1.05] md:text-6xl lg:text-7xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.title}</h1></div></ScrollReveal><ScrollReveal from="right" delay={120} duration={780}><p className="flex items-end text-base font-light leading-8 text-[#5C3C2B] md:text-lg">{copy.intro}</p></ScrollReveal></div></section>
       <section className="mx-auto max-w-[1540px] px-5 py-12 md:px-10 md:py-16 lg:px-14">
-        <ScrollReveal from="bottom" delay={60}><div className="mb-10 flex flex-col gap-5 border-b border-[#F1EBDD] pb-8 lg:flex-row lg:items-center lg:justify-between"><div className="flex flex-wrap gap-2"><button onClick={() => setCategory("ALL")} className={`border px-5 py-2 text-xs tracking-[.14em] ${category === "ALL" ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}>{copy.all}</button>{categories.map(([id, label]) => <button key={id} onClick={() => setCategory(id)} className={`border px-5 py-2 text-xs tracking-[.14em] ${category === id ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}>{label}</button>)}</div><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder={copy.search} className="border-b border-[#F1EBDD] bg-transparent px-2 py-2 text-sm outline-none lg:w-80" /></div></ScrollReveal>
+        <ScrollReveal from="bottom" delay={60}><div className="mb-10 flex flex-col gap-5 border-b border-[#F1EBDD] pb-8 lg:flex-row lg:items-center lg:justify-between"><div className="category-filters"><button onClick={() => setCategory("ALL")} className={`border px-5 py-2 text-xs tracking-[.14em] ${category === "ALL" ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}>{copy.all}</button>{categories.map(([id, label]) => <button key={id} onClick={() => setCategory(id)} className={`border px-5 py-2 text-xs tracking-[.14em] ${category === id ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}>{label}</button>)}</div><input value={query} onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)} placeholder={copy.search} className="border-b border-[#F1EBDD] bg-transparent px-2 py-2 text-sm outline-none lg:w-80" /></div></ScrollReveal>
         <p className="mb-6 text-sm text-[#5C3C2B]">–ó–∞—Ö–∏–∞–ª–≥—ã–Ω –¥–æ–æ–¥ –¥“Ø–Ω: {minimumText} ¬∑ –•“Ø—Ä–≥—ç–ª—Ç–∏–π–Ω —Ç”©–ª–±”©—Ä –æ—Ä–æ—Ö–≥“Ø–π.</p>
         {loadError && <div className="mb-8 border border-[#F00028] bg-[#F1EBDD] px-5 py-4 text-sm text-[#F00028]">{loadError}</div>}
         {loading ? <div className="grid grid-cols-2 gap-5 md:grid-cols-3 lg:grid-cols-4">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="aspect-[4/5] animate-pulse bg-[#F1EBDD]" />)}</div> : loadError ? null : filtered.length === 0 ? <div className="py-24 text-center text-[#5C3C2B]">{products.length === 0 ? (lang === "mn" ? "–û–¥–æ–æ–≥–æ–æ—Ä –±“Ø—Ç—ç—ç–≥–¥—ç—Ö“Ø“Ø–Ω –±“Ø—Ä—Ç–≥—ç–≥–¥—ç—ç–≥“Ø–π –±–∞–π–Ω–∞." : "No products have been added yet.") : (lang === "mn" ? "–•–∞–π–ª—Ç–∞–¥ —Ç–æ—Ö–∏—Ä–æ—Ö –±“Ø—Ç—ç—ç–≥–¥—ç—Ö“Ø“Ø–Ω –æ–ª–¥—Å–æ–Ω–≥“Ø–π." : "No matching products found.")}</div> : <div className="grid grid-cols-2 gap-x-5 gap-y-12 md:grid-cols-3 lg:grid-cols-4">{filtered.map((product, index) => {
@@ -238,9 +37,9 @@ export default function WholesaleStoreClient({ initialCatalogue }: { initialCata
       </section>
     </>}
 
-    {view === "cart" && <section className="mx-auto max-w-5xl px-5 py-14 md:px-10"><button onClick={()=>go("shop")} className="mb-10 text-sm">‚Üê {copy.continue}</button><h1 className="mb-10 text-4xl" style={{fontFamily:"var(--app-font-serif), serif"}}>{copy.cart}</h1>{!cartProducts.length ? <p>{copy.empty}</p> : <div className="grid gap-10 lg:grid-cols-[1fr_340px]"><div>{cartProducts.map(({product,variant,line,valid})=><div key={line.variant_id} className="grid grid-cols-[84px_minmax(0,1fr)] gap-5 border-b border-[#F1EBDD] py-6"><img src={product.imageUrl} alt="" className="aspect-square w-full object-contain"/><div className="min-w-0"><h2 className="text-xl">{nameOf(product,lang)}</h2><p className="mt-2 text-sm">{line.variant_name_mn}</p><p className="text-sm">{line.sku} ¬∑ {variant.weight} {variant.weight_unit}</p><p className="mt-3">{line.quantity} {unitLabel(variant)} √ó {money(line.unit_price)} = <strong>{money(line.quantity*line.unit_price)}</strong></p>{line.order_unit_type==='PACKAGE'&&(line.units_per_order_unit??0)>0&&<p className="mt-2 text-sm">1 {unitLabel(variant)} = {line.units_per_order_unit} —à–∏—Ä—Ö—ç–≥<br/>–ù–∏–π—Ç: {line.quantity*line.units_per_order_unit!} —à–∏—Ä—Ö—ç–≥</p>}{!valid&&<p className="text-sm text-[#F00028]">“Æ–Ω—ç —ç—Å–≤—ç–ª –Ω”©”©—Ü –±–æ–ª–æ–º–∂–≥“Ø–π. –°–∞–≥—Å–Ω–∞–∞—Å —Ö–∞—Å–Ω–∞ —É—É.</p>}<div className="mt-4 flex items-center gap-3"><button aria-label="–ë—É—É—Ä—É—É–ª–∞—Ö" onClick={()=>changeQty(variant,-1)} className="h-10 w-10 border">‚àí</button><span>{line.quantity} {unitLabel(variant)}</span><button aria-label="–ù—ç–º—ç—Ö" disabled={!valid||line.quantity>=(variant.stock_quantity??0)} onClick={()=>changeQty(variant,1)} className="h-10 w-10 border disabled:opacity-30">+</button><button onClick={()=>setCart(current=>{const next={...current};delete next[line.variant_id];return next;})} className="ml-2 text-sm underline">–•–∞—Å–∞—Ö</button></div></div></div>)}</div><aside className="h-fit bg-[#F1EBDD] p-7"><div className="flex justify-between gap-4"><span>–ë–∞—Ä–∞–∞–Ω—ã –Ω–∏–π–ª–±—ç—Ä</span><strong>{money(subtotal)}</strong></div>{minimumNotice}<button disabled={!checkoutAllowed} onClick={()=>go("checkout")} className="w-full bg-[#F00028] px-5 py-4 text-sm text-white disabled:opacity-40">–ó–ê–•–ò–ê–õ–ì–ê “Æ–†–ì–≠–õ–ñ–õ“Æ“Æ–õ–≠–•</button></aside></div>}{!cartProducts.length&&minimumNotice}</section>}
+    {view === "cart" && <section className="mx-auto max-w-5xl px-5 py-14 md:px-10"><button onClick={()=>go("shop")} className="mb-10 text-sm">‚Üê {copy.continue}</button><h1 className="mb-10 text-4xl" style={{fontFamily:"var(--app-font-serif), serif"}}>{copy.cart}</h1>{!cartProducts.length ? <p>{copy.empty}</p> : <div className="grid gap-10 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,.7fr)]"><div>{cartProducts.map(({product,variant,line,valid})=><div key={line.variant_id} className="cart-row grid gap-x-5 gap-y-2 border-b border-[#F1EBDD] py-6"><img src={product.imageUrl} alt="" className="cart-item-image aspect-square w-full object-contain"/><div className="cart-item-main min-w-0"><h2 className="text-xl leading-tight">{nameOf(product,lang)}</h2><p className="mt-2 text-sm">{line.variant_name_mn}</p>{line.order_unit_type==='PACKAGE'&&(line.units_per_order_unit??0)>0&&<p className="mt-1 text-xs text-[#5C3C2B]">1 {unitLabel(variant)} = {line.units_per_order_unit} —à–∏—Ä—Ö—ç–≥</p>}{!valid&&<p className="mt-2 text-sm text-[#F00028]">“Æ–Ω—ç —ç—Å–≤—ç–ª –Ω”©”©—Ü –±–æ–ª–æ–º–∂–≥“Ø–π. –°–∞–≥—Å–Ω–∞–∞—Å —Ö–∞—Å–Ω–∞ —É—É.</p>}</div><div className="cart-item-actions flex flex-col items-end gap-2"><strong className="cart-line-total text-base font-semibold">{money(line.quantity*line.unit_price)}</strong><span className="cart-quantity-label text-[11px] text-[#5C3C2B]">{quantityLabel(variant)}</span><div className="cart-stepper flex w-fit items-center border border-[#5c3c2b55]"><button aria-label="–ë—É—É—Ä—É—É–ª–∞—Ö" onClick={()=>changeQty(variant,-1)} className="h-9 w-9">‚àí</button><span className="cart-stepper-value w-9 text-center text-sm">{line.quantity}</span><button aria-label="–ù—ç–º—ç—Ö" disabled={!valid||line.quantity>=(variant.stock_quantity??0)} onClick={()=>changeQty(variant,1)} className="h-9 w-9 disabled:opacity-30">+</button></div><button type="button" aria-label="–°–∞–≥—Å–Ω–∞–∞—Å —Ö–∞—Å–∞—Ö" title="–°–∞–≥—Å–Ω–∞–∞—Å —Ö–∞—Å–∞—Ö" onClick={()=>setCart(current=>{const next={...current};delete next[line.variant_id];return next;})} className="cart-remove flex h-9 w-9 items-center justify-center text-[#806D61] transition-colors"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6.5 7l.8 12h9.4l.8-12"/><path d="M9 7V4.5h6V7"/></svg></button></div></div>)}</div><aside className="cart-summary h-fit bg-[#F1EBDD] p-7 lg:sticky lg:top-28"><div className="flex justify-between gap-4"><span>–ë–∞—Ä–∞–∞–Ω—ã –Ω–∏–π–ª–±—ç—Ä</span><strong>{money(subtotal)}</strong></div><div className="mt-6"><div className="flex justify-between text-sm"><span>–ó–∞—Ö–∏–∞–ª–≥—ã–Ω –¥–æ–æ–¥ –¥“Ø–Ω</span><strong>{money(minimumTarget)}</strong></div><div className="summary-progress mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={minimumTarget} aria-valuenow={Math.min(subtotal,minimumTarget)}><span style={{width:`${minimumProgress}%`}} /></div><p className="mt-2 text-xs text-[#5C3C2B]">{money(subtotal)} / {money(minimumTarget)}</p></div>{minimumNotice}<button disabled={!checkoutAllowed} onClick={()=>go("checkout")} className="w-full bg-[#F00028] px-5 py-4 text-sm text-white disabled:bg-[#D9B9B9] disabled:opacity-80">–ó–ê–•–ò–ê–õ–ì–ê “Æ–†–ì–≠–õ–ñ–õ“Æ“Æ–õ–≠–•</button></aside></div>}{!cartProducts.length&&minimumNotice}</section>}
 
-    {view === "checkout" && <section className="mx-auto max-w-6xl px-5 py-14 md:px-10 md:py-20"><button onClick={() => go("cart")} className="mb-10 text-xs tracking-[.2em] text-[#5C3C2B]">‚Üê {copy.cart}</button><h1 className="mb-12 text-4xl md:text-5xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.checkoutTitle}</h1><form onSubmit={submitOrder} className="grid gap-10 lg:grid-cols-[1fr_360px]"><div className="space-y-8"><fieldset className="border border-[#F1EBDD] bg-[#FFFFFF] p-6 md:p-8"><legend className="px-3 text-[11px] font-bold tracking-[.18em] text-[#F00028]">{lang === "mn" ? "–•“Æ–õ–≠–≠–ù –ê–í–ê–ì–ß" : "RECIPIENT"}</legend><div className="grid gap-5 md:grid-cols-2">{field("firstName", copy.firstName)}{field("lastName", copy.lastName)}{field("phone", copy.phone)}{field("email", copy.email)}{field("cityDistrict", copy.district, true)}{field("deliveryAddress", copy.address, true)}<label className="md:col-span-2"><span className="mb-2 block text-[10px] tracking-[.14em] text-[#5C3C2B]">{copy.note}</span><textarea value={customer.notes} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setCustomer((current) => ({ ...current, notes: event.target.value }))} className="min-h-28 w-full border border-[#F1EBDD] bg-[#FFFFFF] px-4 py-3 text-sm outline-none" /></label></div></fieldset><fieldset className="border border-[#F1EBDD] p-6"><legend className="px-3 text-[11px] font-bold tracking-[.18em] text-[#F00028]">{copy.delivery}</legend><div className="grid gap-3 md:grid-cols-2">{[["DELIVERY", copy.deliveryOption], ["PICKUP", copy.pickup]].map(([value, label]) => <label key={value} className={`cursor-pointer border p-4 text-sm ${customer.deliveryMethod === value ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}><input type="radio" checked={customer.deliveryMethod === value} onChange={() => setCustomer((current) => ({ ...current, deliveryMethod: value as Customer["deliveryMethod"] }))} className="mr-3" />{label}</label>)}</div></fieldset><fieldset className="border border-[#F1EBDD] p-6"><legend className="px-3 text-[11px] font-bold tracking-[.18em] text-[#F00028]">{copy.payment}</legend><div className="grid gap-3 md:grid-cols-2">{[["BANK_TRANSFER", copy.bank], ["QPAY", copy.qpay]].map(([value, label]) => <label key={value} className={`cursor-pointer border p-4 text-sm ${customer.paymentMethod === value ? "bg-[#F00028] text-white" : "border-[#F1EBDD]"}`}><input type="radio" checked={customer.paymentMethod === value} onChange={() => setCustomer((current) => ({ ...current, paymentMethod: value as Customer["paymentMethod"] }))} className="mr-3" />{label}</label>)}</div></fieldset></div><aside className="h-fit border border-[#F1EBDD] bg-[#F1EBDD] p-7 lg:sticky lg:top-32"><h2 className="mb-5 text-xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.cart}</h2><div className="space-y-3 border-y border-[#F1EBDD] py-5">{cartProducts.map(({product,variant,line}) => <div key={line.variant_id} className="flex justify-between gap-4 text-sm"><span>{nameOf(product,lang)} ¬∑ {line.variant_name_mn}<br/>{line.quantity} {unitLabel(variant)}</span><span>{money(line.unit_price*line.quantity)}</span></div>)}</div><div className="flex justify-between py-6"><span>{copy.subtotal}</span><strong>{money(subtotal)}</strong></div>{minimumNotice}{formError && <p className="mb-5 text-sm leading-6 text-[#F00028]">{formError}</p>}<button type="submit" disabled={submitting || !checkoutAllowed} className="w-full bg-[#F00028] px-6 py-4 text-xs font-semibold tracking-[.18em] text-white disabled:opacity-50">{submitting ? copy.sending : copy.place}</button><p className="mt-4 text-[11px] leading-5 text-[#5C3C2B]">{lang === "mn" ? "–ö–∞—Ä—Ç—ã–Ω –¥—É–≥–∞–∞—Ä, CVV, –±–∞–Ω–∫–Ω—ã –Ω—É—É—Ü “Ø–≥ —ç–Ω—ç —Å–∞–π—Ç–∞–¥ —Ö–∞–¥–≥–∞–ª–∞–≥–¥–∞—Ö–≥“Ø–π." : "Card numbers, CVV and banking passwords are never stored by this site."}</p></aside></form></section>}
+    {view === "checkout" && <section className="mx-auto max-w-6xl px-5 py-14 md:px-10 md:py-20"><button onClick={() => go("cart")} className="mb-10 text-xs tracking-[.2em] text-[#5C3C2B]">‚Üê {copy.cart}</button><h1 className="mb-12 text-4xl md:text-5xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.checkoutTitle}</h1><form onSubmit={submitOrder} className="grid gap-12 lg:grid-cols-[minmax(0,680px)_minmax(300px,380px)]"><div className="space-y-8"><fieldset className="checkout-section"><legend className="text-[11px] font-bold tracking-[.18em] text-[#F00028]">{lang === "mn" ? "01 –•“Æ–õ–≠–≠–ù –ê–í–ê–ì–ß" : "01 RECIPIENT"}</legend><div className="grid gap-5">{field("firstName", copy.firstName)}{field("lastName", copy.lastName)}{field("phone", copy.phone)}{field("email", copy.email)}{field("cityDistrict", copy.district)}{field("deliveryAddress", copy.address)}<label><span className="mb-2 block text-[10px] tracking-[.14em] text-[#5C3C2B]">{copy.note}</span><textarea value={customer.notes} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setCustomer((current) => ({ ...current, notes: event.target.value }))} className="min-h-28 w-full border border-[#F1EBDD] bg-[#FFFFFF] px-4 py-3 text-sm outline-none" /></label></div></fieldset><fieldset className="checkout-section"><legend className="text-[11px] font-bold tracking-[.18em] text-[#F00028]">{lang === "mn" ? "02 –•“Æ–õ–≠–≠–ù –ê–í–ê–• –•–≠–õ–ë–≠–†" : "02 DELIVERY METHOD"}</legend><div className="grid gap-3 md:grid-cols-2">{[["DELIVERY", copy.deliveryOption], ["PICKUP", copy.pickup]].map(([value, label]) => <label key={value} className={`choice-card ${customer.deliveryMethod === value ? "selected" : ""} flex cursor-pointer items-center p-4 text-sm`}><input type="radio" checked={customer.deliveryMethod === value} onChange={() => setCustomer((current) => ({ ...current, deliveryMethod: value as Customer["deliveryMethod"] }))} className="mr-3" />{label}</label>)}</div></fieldset><fieldset className="checkout-section"><legend className="text-[11px] font-bold tracking-[.18em] text-[#F00028]">{lang === "mn" ? "03 –¢”®–õ–ë”®–†–ò–ô–ù –•–≠–õ–ë–≠–†" : "03 PAYMENT METHOD"}</legend><div className="grid gap-3 md:grid-cols-2">{[["BANK_TRANSFER", copy.bank], ["QPAY", copy.qpay]].map(([value, label]) => <label key={value} className={`choice-card ${customer.paymentMethod === value ? "selected" : ""} flex cursor-pointer items-center p-4 text-sm`}><input type="radio" checked={customer.paymentMethod === value} onChange={() => setCustomer((current) => ({ ...current, paymentMethod: value as Customer["paymentMethod"] }))} className="mr-3" />{label}</label>)}</div></fieldset></div><aside className="checkout-summary h-fit bg-[#F1EBDD] p-7 lg:sticky lg:top-32"><h2 className="mb-5 text-xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{lang === "mn" ? "04 –ó–ê–•–ò–ê–õ–ì–´–ù –•–Ø–ù–ê–õ–¢" : "04 ORDER REVIEW"}</h2><div className="space-y-3 border-y border-[#E7DDCB] py-5">{cartProducts.map(({product,variant,line}) => <div key={line.variant_id} className="flex justify-between gap-4 text-sm"><span>{nameOf(product,lang)} ¬∑ {line.variant_name_mn}<br/>{line.quantity} {unitLabel(variant)}</span><span>{money(line.unit_price*line.quantity)}</span></div>)}</div><div className="flex justify-between py-6"><span>{copy.subtotal}</span><strong>{money(subtotal)}</strong></div>{minimumNotice}{formError && <p className="mb-5 text-sm leading-6 text-[#F00028]">{formError}</p>}<button type="submit" disabled={submitting || !checkoutAllowed} className="w-full bg-[#F00028] px-6 py-4 text-xs font-semibold tracking-[.18em] text-white disabled:opacity-50">{submitting ? copy.sending : copy.place}</button><p className="mt-4 text-[11px] leading-5 text-[#5C3C2B]">{lang === "mn" ? "–ö–∞—Ä—Ç—ã–Ω –¥—É–≥–∞–∞—Ä, CVV, –±–∞–Ω–∫–Ω—ã –Ω—É—É—Ü “Ø–≥ —ç–Ω—ç —Å–∞–π—Ç–∞–¥ —Ö–∞–¥–≥–∞–ª–∞–≥–¥–∞—Ö–≥“Ø–π." : "Card numbers, CVV and banking passwords are never stored by this site."}</p></aside></form></section>}
 
     {view === "success" && <section className="mx-auto flex min-h-[65vh] max-w-3xl items-center px-5 py-16 md:px-10"><div className="w-full border border-[#F1EBDD] bg-[#F1EBDD] p-8 text-center md:p-14"><div className="mx-auto mb-7 flex h-14 w-14 items-center justify-center rounded-full bg-[#C98A3D] text-2xl text-white">‚úì</div><h1 className="text-3xl md:text-4xl" style={{ fontFamily: "var(--app-font-serif), serif" }}>{copy.success}</h1><p className="mx-auto mt-5 max-w-xl text-sm leading-7 text-[#5C3C2B]">{copy.successBody}</p><div className="mx-auto my-8 max-w-sm border-y border-[#F1EBDD] py-5"><p className="text-[10px] tracking-[.16em] text-[#5C3C2B]">{copy.orderNo}</p><strong className="mt-2 block text-xl">{orderNumber}</strong></div><button onClick={() => go("shop")} className="bg-[#F00028] px-8 py-4 text-xs font-semibold tracking-[.18em] text-white">{copy.back}</button></div></section>}
 
